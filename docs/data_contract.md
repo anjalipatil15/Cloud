@@ -32,10 +32,12 @@ One row per invocation (warm or cold).
 | arch | S | | collector | `x86` / `arm64` |
 | packaging | S | | collector | `zip` / `layer` / `image` |
 | package_mb | N | | runner | deployed package size |
-| n_imports | N | | collector | modules imported during INIT; set only when the import lines and REPORT arrive in the same batch |
+| n_imports | N | | export | modules imported during INIT. Not stored here: the export reads it from the `import_profiles` row `#stream {log_stream}` |
 | log_stream | S | | collector | cold starts only; joins to `import_profiles` |
 | billed_restore_ms | N | | collector | SnapStart only |
-| forced | BOOL | | runner | true for runner-forced cold starts |
+| forced | BOOL | | runner | true for runner-forced cold starts; false for idle-gap invokes |
+| client_ms | N | | runner | end-to-end latency seen by the caller (strategy experiment) |
+| version | S | | runner | published version invoked (SnapStart / provisioned runs) |
 | idle_gap_min | N | | runner | minutes since previous invoke; absent for forced cold starts |
 | is_cold | BOOL | | collector | REPORT contains `Init Duration` or `Restore Duration` |
 | init_ms | N | | collector | `Init Duration`; absent when warm |
@@ -66,6 +68,12 @@ modules per cold start, which would dominate the DynamoDB bill.
 | cumulative_us | N | | cumulative time, microseconds |
 | log_stream | S | | which cold start it came from (joins to `invocations.log_stream`) |
 | ts | S | | |
+
+**Import counters:** rows whose `module` is `#stream {log_stream}` are not
+modules. They hold one field, `n_imports`: the number of import-time lines
+from that log stream's cold start. The collector adds to it with `ADD`,
+because CloudWatch can split one cold start's import lines across several
+deliveries. Skip these rows when analysing module timings.
 
 ## Table `recommendations`
 One row per function, written by `ml/recommender.py`.

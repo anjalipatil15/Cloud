@@ -14,14 +14,17 @@ Full plan: `docs/TASKS.md`. Proposal: `docs/proposal.pdf`. Setup, team access an
 Keep the role split in docs and handovers.
 
 ## Status (2026-10-19)
-- Stage 0: account, $5 budget, quota/SnapStart check done. Open: teammate IAM users
-  (`infra/account-setup.yaml` ready, not deployed), GitHub repo, data contract sign-off,
-  Lambda concurrency increase 10 → 1000 (requested, pending).
-- Stage 1: complete except C's mock dataset + EDA notebook. Pilot stack `observatory`
-  is deployed (tiny/web/data-512-x86-zip + collector); run `pilot-1` verified end to end.
-- Stage 2: collector EMF metrics done. Next: core sweep, packaging experiment, `scripts/export_csv.py`, Grafana.
-- Open decision: import profiles write ~200 rows per `data` cold start; proposed storing them
-  only for the first cold start per function per run.
+- Scope for Anjali: everything up to the ML part (Stages 0-3 for A and B, plus handover data).
+  ML (models, SHAP, recommender) is done by a teammate (role C).
+- Stage 0: account, $5 budget, quota/SnapStart check, teammate IAM users (`observatory-account` stack),
+  GitHub repo (github.com/anjalipatil15/Cloud) done. Open: data contract sign-off,
+  Lambda concurrency 10 -> 1000 (support case 179237768000615, pending).
+- Stage 1: complete except C's mock dataset + EDA notebook. Run `pilot-1` verified end to end.
+- Stage 2/3 code written and built, NOT yet deployed (`--matrix full`: 36 core + 8 packaging functions,
+  idle-gap Lambda + schedule group): collector fixes (per-stream import counter, Grafana log fields),
+  `runner/idle_gap.py`, `runner/strategy.py`, `scripts/export_csv.py`, `scripts/demo_pipeline.py`,
+  Grafana in `dashboards/` (tested locally: datasource OK, metric panels return data).
+- Provisioned concurrency is impossible until the quota increase (Lambda keeps 10 unreserved).
 - Keep `docs/TASKS.md` checkboxes and this section current when tasks finish.
 
 ## Team access
@@ -83,6 +86,9 @@ docs/         TASKS.md, proposal.pdf, data_contract.md
   pattern `?REPORT ?"import time"`; payload is base64 + gzip.
 - Import lines are joined to a cold start by log stream (one stream per execution environment).
   Only modules with cumulative time >= 1 ms are stored (`MIN_IMPORT_US`) to keep DynamoDB writes cheap.
+  CloudWatch can split one cold start's import lines across batches, so the collector counts them per stream
+  with `ADD` in `import_profiles` row `#stream {log_stream}`; `n_imports` is joined in at export, not stored on invocations.
+- `scripts/demo_pipeline.py` runs fresh cold starts and prints every pipeline step (use it to verify changes and for the demo).
 - INIT is billed at the normal duration price (since Aug 2025), so `init_cost_usd` = GB × init seconds × duration price.
 - Collector writes DynamoDB rows and CloudWatch EMF metrics (namespace `ColdStartObservatory`).
   Keep EMF dimensions to workload, arch, packaging (each combination is a billed metric).
@@ -94,7 +100,7 @@ docs/         TASKS.md, proposal.pdf, data_contract.md
 ## Data contract (DynamoDB)
 Full schema in `docs/data_contract.md`; change it there first.
 - `invocations`: PK `function_id`, SK `request_id`. Fields: ts, workload, memory_mb,
-  arch, packaging, package_mb, n_imports, log_stream, idle_gap_min, is_cold, init_ms,
+  arch, packaging, package_mb, n_imports (joined at export), log_stream, idle_gap_min, is_cold, init_ms,
   restore_ms, billed_restore_ms, duration_ms, billed_ms, max_mem_mb, init_cost_usd,
   strategy, run_id, forced
 - `import_profiles`: PK `function_id`, SK `module`. Fields: self_us, cumulative_us, log_stream, ts

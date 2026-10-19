@@ -19,6 +19,9 @@ from cost import init_cost_usd, restore_cost_usd
 # (cumulative). Full profiles are ~1000 modules per cold start for pandas,
 # which would cost more in DynamoDB writes than the rest of the project.
 MIN_IMPORT_US = int(os.environ.get("MIN_IMPORT_US", "1000"))
+# import_profiles rows whose `module` starts with this hold the per-log-stream
+# import line count (n_imports) instead of a module timing.
+STREAM_PREFIX = "#stream "
 
 FUNCTION_ID = re.compile(r"^(tiny|web|data|ml)-(\d+)-(x86|arm64)-(zip|layer|image)$")
 REPORT_FIELDS = {
@@ -80,11 +83,11 @@ def iso(ms):
 
 
 def build_rows(payload):
-    """Pure parsing step: returns (invocation rows, import-profile rows)."""
+    """Pure parsing step: returns (invocation rows, import-profile rows, import line count)."""
     function_id = payload["logGroup"].rsplit("/", 1)[-1]
     meta = parse_function_id(function_id)
     if meta is None:
-        return [], []
+        return [], [], 0
 
     imports, reports = [], []
     for ev in payload["logEvents"]:
@@ -107,10 +110,9 @@ def build_rows(payload):
             row["init_cost_usd"] = init_cost_usd(meta["memory_mb"], meta["arch"], row["init_ms"])
         if "restore_ms" in row:
             row["init_cost_usd"] = restore_cost_usd(meta["memory_mb"])
-        # Import lines are printed during INIT, so they belong to this log
-        # stream's cold start when both arrive in the same batch.
-        if row["is_cold"] and imports:
-            row["n_imports"] = len(imports)
+        # One log stream per execution environment, so the stream identifies
+        # this cold start's import lines (which may arrive in other batches).
+        if row["is_cold"]:
             row["log_stream"] = payload["logStream"]
         invocations.append(row)
 
@@ -119,7 +121,7 @@ def build_rows(payload):
         for imp in imports
         if imp["cumulative_us"] >= MIN_IMPORT_US
     ]
-    return invocations, profiles
+    return invocations, profiles, len(imports)
 
 
 def _dynamo(value):
@@ -147,6 +149,9 @@ def emit_metrics(row):
     """CloudWatch Embedded Metric Format: one JSON line on stdout."""
     metrics = [{"Name": "ColdStart", "Unit": "Count"}]
     doc = {"workload": row["workload"], "arch": row["arch"], "packaging": row["packaging"], "ColdStart": int(row["is_cold"])}
+    # Not dimensions (those are billed per combination): plain fields that
+    # Grafana reads with Logs Insights for per-function and per-memory panels.
+    doc.update({"type": "invocation", "function_id": row["function_id"], "memory_mb": row["memory_mb"]})
     if row["is_cold"]:
         metrics.append({"Name": "InitDurationMs", "Unit": "Milliseconds"})
         metrics.append({"Name": "ColdStartCostUSD", "Unit": "None"})
@@ -170,12 +175,23 @@ def handler(event, context):
     if payload.get("messageType") != "DATA_MESSAGE":
         return {"invocations": 0, "imports": 0}
 
-    invocations, profiles = build_rows(payload)
+    invocations, profiles, n_import_lines = build_rows(payload)
     for row in invocations:
         write_invocation(row)
         emit_metrics(row)
+    if n_import_lines:
+        # A cold start's import lines can span several batches, so count them
+        # per log stream with ADD; the export joins this to invocations.log_stream.
+        _table("IMPORTS_TABLE").update_item(
+            Key={"function_id": payload["logGroup"].rsplit("/", 1)[-1], "module": STREAM_PREFIX + payload["logStream"]},
+            UpdateExpression="ADD n_imports :n",
+            ExpressionAttributeValues={":n": n_import_lines},
+        )
     if profiles:
         with _table("IMPORTS_TABLE").batch_writer(overwrite_by_pkeys=["function_id", "module"]) as batch:
             for p in profiles:
                 batch.put_item(Item={k: _dynamo(v) for k, v in p.items()})
+                # For Grafana's "slowest imports" panel (Logs Insights on this log group).
+                print(json.dumps({"type": "import", "function_id": p["function_id"], "module": p["module"],
+                                  "self_us": p["self_us"], "cumulative_us": p["cumulative_us"]}))
     return {"invocations": len(invocations), "imports": len(profiles)}

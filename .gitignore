@@ -32,3 +32,4 @@ collector/cost.py
 collector/pricing.json
 # Generated
 infra/template.yaml
+infra/.gen/

@@ -1,0 +1,10 @@
+apiVersion: 1
+datasources:
+  - name: CloudWatch
+    type: cloudwatch
+    uid: cloudwatch
+    isDefault: true
+    jsonData:
+      # "default" = AWS SDK credential chain: the AWS_PROFILE set in docker-compose.yml.
+      authType: default
+      defaultRegion: eu-north-1

@@ -52,13 +52,14 @@ start shows up as a row with `init_ms` and an import profile.
 - [ ] Expand matrix (core sweep: workloads × memory × arch, ZIP)
 - [ ] Packaging experiment: `data` as ZIP vs layer vs container, both archs
 - [ ] Parallel runner (8 threads) + concurrent-burst trick; ~30 cold samples each
-- [ ] `scripts/export_csv.py` run after every experiment
+- [x] `scripts/export_csv.py` run after every experiment
 
 **B**
 - [x] EMF metrics from collector (InitDurationMs, ColdStart, ColdStartCostUSD)
   - Built into the collector in Stage 1; verified in CloudWatch for the pilot.
-- [ ] Grafana panels: cold-start rate, init vs memory by arch, init by packaging,
+- [x] Grafana panels: cold-start rate, init vs memory by arch, init by packaging,
       cost per function, top slow imports
+  - Local Grafana via `dashboards/docker-compose.yml` (read-only `observatory-grafana` profile); dashboard JSON built by `dashboards/build_dashboard.py`.
 
 **C**
 - [ ] Feature table from real data; baseline model on core sweep

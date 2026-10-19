@@ -60,18 +60,28 @@ def test_parse_report_snapstart():
 
 
 def test_build_rows_joins_imports_to_cold_start():
-    inv, prof = app.build_rows(payload("/aws/lambda/data-512-x86-zip", IMPORTS + [COLD_REPORT]))
+    inv, prof, n_lines = app.build_rows(payload("/aws/lambda/data-512-x86-zip", IMPORTS + [COLD_REPORT]))
     assert len(inv) == 1
     row = inv[0]
     assert row["workload"] == "data" and row["memory_mb"] == 512 and row["arch"] == "x86"
-    assert row["n_imports"] == 3  # header line is not a module
+    assert n_lines == 3  # header line is not a module
+    assert row["log_stream"] == "2026/10/19/[$LATEST]abc"
     assert row["init_cost_usd"] > 0
     # _io (850 us) is below the 1 ms threshold
     assert sorted(p["module"] for p in prof) == ["numpy.core._multiarray_umath", "pandas"]
 
 
 def test_unknown_function_ignored():
-    assert app.build_rows(payload("/aws/lambda/observatory-collector", [COLD_REPORT])) == ([], [])
+    assert app.build_rows(payload("/aws/lambda/observatory-collector", [COLD_REPORT])) == ([], [], 0)
+
+
+def test_imports_split_across_batches():
+    # CloudWatch may deliver one cold start's import lines in several batches.
+    stream = "2026/10/19/[$LATEST]split"
+    _, _, first = app.build_rows(payload("/aws/lambda/data-512-x86-zip", IMPORTS[:2], stream))
+    inv, _, second = app.build_rows(payload("/aws/lambda/data-512-x86-zip", IMPORTS[2:] + [COLD_REPORT], stream))
+    assert first + second == 3
+    assert inv[0]["log_stream"] == stream
 
 
 def test_decode_roundtrip():

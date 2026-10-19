@@ -1,0 +1,552 @@
+{
+  "uid": "cold-start-observatory",
+  "title": "Cold-Start Observatory",
+  "tags": [
+    "lambda",
+    "cold-start"
+  ],
+  "timezone": "browser",
+  "schemaVersion": 39,
+  "time": {
+    "from": "now-7d",
+    "to": "now"
+  },
+  "refresh": "1m",
+  "panels": [
+    {
+      "id": 1,
+      "title": "Cold starts",
+      "type": "stat",
+      "description": "",
+      "datasource": {
+        "type": "cloudwatch",
+        "uid": "cloudwatch"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "cloudwatch",
+            "uid": "cloudwatch"
+          },
+          "queryMode": "Logs",
+          "region": "default",
+          "logGroupNames": [
+            "/aws/lambda/observatory-collector"
+          ],
+          "expression": "filter type = \"invocation\" and ColdStart = 1 | stats count() as cold_starts",
+          "statsGroups": []
+        }
+      ],
+      "gridPos": {
+        "x": 0,
+        "y": 0,
+        "w": 6,
+        "h": 4
+      },
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": []
+      },
+      "options": {}
+    },
+    {
+      "id": 2,
+      "title": "Average init time",
+      "type": "stat",
+      "description": "",
+      "datasource": {
+        "type": "cloudwatch",
+        "uid": "cloudwatch"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "cloudwatch",
+            "uid": "cloudwatch"
+          },
+          "queryMode": "Logs",
+          "region": "default",
+          "logGroupNames": [
+            "/aws/lambda/observatory-collector"
+          ],
+          "expression": "filter type = \"invocation\" and ColdStart = 1 | stats avg(InitDurationMs) as avg_init",
+          "statsGroups": []
+        }
+      ],
+      "gridPos": {
+        "x": 6,
+        "y": 0,
+        "w": 6,
+        "h": 4
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ms"
+        },
+        "overrides": []
+      },
+      "options": {}
+    },
+    {
+      "id": 3,
+      "title": "Total cold-start cost",
+      "type": "stat",
+      "description": "",
+      "datasource": {
+        "type": "cloudwatch",
+        "uid": "cloudwatch"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "cloudwatch",
+            "uid": "cloudwatch"
+          },
+          "queryMode": "Logs",
+          "region": "default",
+          "logGroupNames": [
+            "/aws/lambda/observatory-collector"
+          ],
+          "expression": "filter type = \"invocation\" and ColdStart = 1 | stats sum(ColdStartCostUSD) as cost",
+          "statsGroups": []
+        }
+      ],
+      "gridPos": {
+        "x": 12,
+        "y": 0,
+        "w": 6,
+        "h": 4
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "currencyUSD"
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "cost"
+            },
+            "properties": [
+              {
+                "id": "decimals",
+                "value": 6
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        },
+        "text": {},
+        "graphMode": "none"
+      }
+    },
+    {
+      "id": 4,
+      "title": "Functions measured",
+      "type": "stat",
+      "description": "",
+      "datasource": {
+        "type": "cloudwatch",
+        "uid": "cloudwatch"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "cloudwatch",
+            "uid": "cloudwatch"
+          },
+          "queryMode": "Logs",
+          "region": "default",
+          "logGroupNames": [
+            "/aws/lambda/observatory-collector"
+          ],
+          "expression": "filter type = \"invocation\" and ColdStart = 1 | stats count_distinct(function_id) as functions",
+          "statsGroups": []
+        }
+      ],
+      "gridPos": {
+        "x": 18,
+        "y": 0,
+        "w": 6,
+        "h": 4
+      },
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": []
+      },
+      "options": {}
+    },
+    {
+      "id": 5,
+      "title": "Cold starts over time",
+      "type": "timeseries",
+      "description": "Sum of the ColdStart metric (1 per cold invocation) per workload / arch / packaging.",
+      "datasource": {
+        "type": "cloudwatch",
+        "uid": "cloudwatch"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "cloudwatch",
+            "uid": "cloudwatch"
+          },
+          "queryMode": "Metrics",
+          "region": "default",
+          "namespace": "ColdStartObservatory",
+          "metricName": "ColdStart",
+          "statistic": "Sum",
+          "dimensions": {
+            "workload": "*",
+            "arch": "*",
+            "packaging": "*"
+          },
+          "matchExact": true,
+          "period": "",
+          "label": "${PROP('Dim.workload')} ${PROP('Dim.arch')} ${PROP('Dim.packaging')}",
+          "metricQueryType": 0,
+          "metricEditorMode": 0,
+          "id": "",
+          "expression": ""
+        }
+      ],
+      "gridPos": {
+        "x": 0,
+        "y": 4,
+        "w": 12,
+        "h": 8
+      },
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": []
+      },
+      "options": {}
+    },
+    {
+      "id": 6,
+      "title": "Init duration over time",
+      "type": "timeseries",
+      "description": "Average INIT (or SnapStart restore) duration.",
+      "datasource": {
+        "type": "cloudwatch",
+        "uid": "cloudwatch"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "cloudwatch",
+            "uid": "cloudwatch"
+          },
+          "queryMode": "Metrics",
+          "region": "default",
+          "namespace": "ColdStartObservatory",
+          "metricName": "InitDurationMs",
+          "statistic": "Average",
+          "dimensions": {
+            "workload": "*",
+            "arch": "*",
+            "packaging": "*"
+          },
+          "matchExact": true,
+          "period": "",
+          "label": "${PROP('Dim.workload')} ${PROP('Dim.arch')} ${PROP('Dim.packaging')}",
+          "metricQueryType": 0,
+          "metricEditorMode": 0,
+          "id": "",
+          "expression": ""
+        }
+      ],
+      "gridPos": {
+        "x": 12,
+        "y": 4,
+        "w": 12,
+        "h": 8
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ms"
+        },
+        "overrides": []
+      },
+      "options": {}
+    },
+    {
+      "id": 7,
+      "title": "Init time by memory and architecture",
+      "type": "table",
+      "description": "More memory means more CPU during INIT. Compare x86 and arm64 at each size.",
+      "datasource": {
+        "type": "cloudwatch",
+        "uid": "cloudwatch"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "cloudwatch",
+            "uid": "cloudwatch"
+          },
+          "queryMode": "Logs",
+          "region": "default",
+          "logGroupNames": [
+            "/aws/lambda/observatory-collector"
+          ],
+          "expression": "filter type = \"invocation\" and ColdStart = 1 | stats avg(InitDurationMs) as avg_ms, pct(InitDurationMs, 90) as p90_ms, count() as n by workload, memory_mb, arch | sort workload asc, memory_mb asc, arch asc",
+          "statsGroups": []
+        }
+      ],
+      "gridPos": {
+        "x": 0,
+        "y": 12,
+        "w": 12,
+        "h": 10
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ms"
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "n"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "none"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "memory_mb"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "decmbytes"
+              }
+            ]
+          }
+        ]
+      },
+      "options": {}
+    },
+    {
+      "id": 8,
+      "title": "Init time by packaging (data workload)",
+      "type": "bargauge",
+      "description": "ZIP vs layer vs container image, for the same pandas workload.",
+      "datasource": {
+        "type": "cloudwatch",
+        "uid": "cloudwatch"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "cloudwatch",
+            "uid": "cloudwatch"
+          },
+          "queryMode": "Metrics",
+          "region": "default",
+          "namespace": "ColdStartObservatory",
+          "metricName": "InitDurationMs",
+          "statistic": "Average",
+          "dimensions": {
+            "workload": "data",
+            "arch": "*",
+            "packaging": "*"
+          },
+          "matchExact": true,
+          "period": "",
+          "label": "${PROP('Dim.packaging')} ${PROP('Dim.arch')}",
+          "metricQueryType": 0,
+          "metricEditorMode": 0,
+          "id": "",
+          "expression": ""
+        }
+      ],
+      "gridPos": {
+        "x": 12,
+        "y": 12,
+        "w": 12,
+        "h": 10
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ms"
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "mean"
+          ]
+        },
+        "orientation": "horizontal",
+        "displayMode": "gradient"
+      }
+    },
+    {
+      "id": 9,
+      "title": "Cold-start cost per function",
+      "type": "table",
+      "description": "INIT is billed like normal duration (since Aug 2025).",
+      "datasource": {
+        "type": "cloudwatch",
+        "uid": "cloudwatch"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "cloudwatch",
+            "uid": "cloudwatch"
+          },
+          "queryMode": "Logs",
+          "region": "default",
+          "logGroupNames": [
+            "/aws/lambda/observatory-collector"
+          ],
+          "expression": "filter type = \"invocation\" and ColdStart = 1 | stats sum(ColdStartCostUSD) as cost_usd, count() as cold_starts, avg(InitDurationMs) as avg_init_ms by function_id | sort cost_usd desc",
+          "statsGroups": []
+        }
+      ],
+      "gridPos": {
+        "x": 0,
+        "y": 22,
+        "w": 12,
+        "h": 10
+      },
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "cost_usd"
+            },
+            "properties": [
+              {
+                "id": "decimals",
+                "value": 7
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "avg_init_ms"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "ms"
+              }
+            ]
+          }
+        ]
+      },
+      "options": {}
+    },
+    {
+      "id": 10,
+      "title": "Slowest top-level imports",
+      "type": "table",
+      "description": "Cumulative import time per top-level package (includes its submodules).",
+      "datasource": {
+        "type": "cloudwatch",
+        "uid": "cloudwatch"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "cloudwatch",
+            "uid": "cloudwatch"
+          },
+          "queryMode": "Logs",
+          "region": "default",
+          "logGroupNames": [
+            "/aws/lambda/observatory-collector"
+          ],
+          "expression": "filter type = \"import\" and module not like /\\./ and module not like /^_/ | stats avg(cumulative_us) / 1000 as avg_ms, count() as seen by function_id, module | sort avg_ms desc | limit 20",
+          "statsGroups": []
+        }
+      ],
+      "gridPos": {
+        "x": 12,
+        "y": 22,
+        "w": 12,
+        "h": 10
+      },
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "avg_ms"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "ms"
+              },
+              {
+                "id": "decimals",
+                "value": 1
+              }
+            ]
+          }
+        ]
+      },
+      "options": {}
+    },
+    {
+      "id": 11,
+      "title": "Strategy recommendations",
+      "type": "text",
+      "description": "",
+      "datasource": {
+        "type": "cloudwatch",
+        "uid": "cloudwatch"
+      },
+      "targets": [
+        {
+          "refId": "A"
+        }
+      ],
+      "gridPos": {
+        "x": 0,
+        "y": 32,
+        "w": 24,
+        "h": 4
+      },
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": []
+      },
+      "options": {
+        "mode": "markdown",
+        "content": "Added in Stage 4: per-function strategy from `ml/recommender.py` (cheapest of on-demand / SnapStart / provisioned concurrency meeting the latency target)."
+      }
+    }
+  ]
+}

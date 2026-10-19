@@ -1,0 +1,25 @@
+# Local Grafana with the CloudWatch data source and the observatory dashboard
+# provisioned from this folder.
+#
+#   docker compose -f dashboards/docker-compose.yml up -d     -> http://localhost:3000 (admin / admin)
+#
+# Credentials come from ~/.aws, profile `observatory-grafana` (read-only IAM user).
+# Set GRAFANA_AWS_PROFILE to use another profile.
+services:
+  grafana:
+    image: grafana/grafana-oss:11.3.0
+    container_name: observatory-grafana
+    ports:
+      - "3000:3000"
+    environment:
+      AWS_PROFILE: ${GRAFANA_AWS_PROFILE:-observatory-grafana}
+      AWS_SHARED_CREDENTIALS_FILE: /aws/credentials
+      AWS_CONFIG_FILE: /aws/config
+      GF_AUTH_ANONYMOUS_ENABLED: "false"
+    volumes:
+      - ${USERPROFILE:-~}/.aws:/aws:ro
+      - ./provisioning:/etc/grafana/provisioning:ro
+      - ./observatory.json:/var/lib/grafana/dashboards/observatory.json:ro
+      - grafana-data:/var/lib/grafana
+volumes:
+  grafana-data:

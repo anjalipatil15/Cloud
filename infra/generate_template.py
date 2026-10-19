@@ -3,7 +3,7 @@
 One stack ("observatory") holds the tables, the collector and every test
 function; redeploying with a bigger matrix adds functions.
 
-    python infra/generate_template.py --matrix pilot
+    python infra/generate_template.py --matrix pilot   # or core, full (core + packaging)
     sam build --use-container && sam deploy
 
 Each test function gets: the function, its log group (7-day retention) and a
@@ -17,13 +17,23 @@ from pathlib import Path
 import yaml
 
 ROOT = Path(__file__).resolve().parents[1]
+GEN = ROOT / "infra" / ".gen"
 
 MATRICES = {
     # Stage 1: one function per workload, smallest set that proves the pipeline.
     "pilot": [("tiny", 512, "x86", "zip"), ("web", 512, "x86", "zip"), ("data", 512, "x86", "zip")],
-    # Stage 2 core sweep: workloads x memory x arch, ZIP only.
-    "core": list(itertools.product(["tiny", "web", "data", "ml"], [128, 256, 512, 1024, 2048], ["x86", "arm64"], ["zip"])),
+    # Stage 2 core sweep: workloads x memory x arch, ZIP only. `data` and `ml`
+    # skip 128 MB: importing pandas alone peaks at ~130 MB, so INIT would run out of memory.
+    "core": [
+        combo
+        for combo in itertools.product(["tiny", "web", "data", "ml"], [128, 256, 512, 1024, 2048], ["x86", "arm64"], ["zip"])
+        if not (combo[0] in ("data", "ml") and combo[1] == 128)
+    ],
+    # Stage 2 packaging experiment: `data` as layer and container image (ZIP is in core).
+    "packaging": list(itertools.product(["data"], [512, 1024], ["x86", "arm64"], ["layer", "image"])),
 }
+# One stack holds everything, so each deploy must list every matrix still wanted.
+MATRICES["full"] = MATRICES["core"] + MATRICES["packaging"]
 ARCH = {"x86": "x86_64", "arm64": "arm64"}
 
 
@@ -66,6 +76,7 @@ def base_resources():
                 "FunctionName": "observatory-collector",
                 "CodeUri": "../collector/",
                 "Handler": "app.handler",
+                "Runtime": "python3.12",
                 "Architectures": ["arm64"],
                 "MemorySize": 256,
                 "Timeout": 60,
@@ -85,6 +96,63 @@ def base_resources():
             "Type": "AWS::Logs::LogGroup",
             "Properties": {"LogGroupName": "/aws/lambda/observatory-collector", "RetentionInDays": 7},
         },
+        # Idle-gap experiment (runner/idle_gap.py): a Lambda that invokes a test
+        # function and books its own next run via one-time Scheduler schedules.
+        "IdleGapScheduleGroup": {
+            "Type": "AWS::Scheduler::ScheduleGroup",
+            "Properties": {"Name": "observatory-idle-gap"},
+        },
+        "IdleGapSchedulerRole": {
+            "Type": "AWS::IAM::Role",
+            "Properties": {
+                "AssumeRolePolicyDocument": {
+                    "Version": "2012-10-17",
+                    "Statement": [{"Effect": "Allow", "Principal": {"Service": "scheduler.amazonaws.com"}, "Action": "sts:AssumeRole"}],
+                },
+                "Policies": [
+                    {
+                        "PolicyName": "invoke-idle-gap",
+                        "PolicyDocument": {
+                            "Version": "2012-10-17",
+                            "Statement": [{"Effect": "Allow", "Action": "lambda:InvokeFunction", "Resource": {"Fn::Sub": "arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function:observatory-idle-gap"}}],
+                        },
+                    }
+                ],
+            },
+        },
+        "IdleGapFunction": {
+            "Type": "AWS::Serverless::Function",
+            "Properties": {
+                "FunctionName": "observatory-idle-gap",
+                "CodeUri": "../runner/",
+                "Handler": "idle_gap.handler",
+                "Runtime": "python3.12",
+                "Architectures": ["arm64"],
+                "MemorySize": 128,
+                "Timeout": 60,
+                "Environment": {
+                    "Variables": {
+                        "INVOCATIONS_TABLE": {"Ref": "InvocationsTable"},
+                        "SCHEDULER_ROLE_ARN": {"Fn::GetAtt": ["IdleGapSchedulerRole", "Arn"]},
+                        "SCHEDULE_GROUP": {"Ref": "IdleGapScheduleGroup"},
+                    }
+                },
+                "Policies": [
+                    {"DynamoDBCrudPolicy": {"TableName": {"Ref": "InvocationsTable"}}},
+                    {
+                        "Statement": [
+                            {"Effect": "Allow", "Action": "lambda:InvokeFunction", "Resource": {"Fn::Sub": "arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function:*"}},
+                            {"Effect": "Allow", "Action": "scheduler:CreateSchedule", "Resource": {"Fn::Sub": "arn:aws:scheduler:${AWS::Region}:${AWS::AccountId}:schedule/observatory-idle-gap/*"}},
+                            {"Effect": "Allow", "Action": "iam:PassRole", "Resource": {"Fn::GetAtt": ["IdleGapSchedulerRole", "Arn"]}},
+                        ]
+                    },
+                ],
+            },
+        },
+        "IdleGapLogGroup": {
+            "Type": "AWS::Logs::LogGroup",
+            "Properties": {"LogGroupName": "/aws/lambda/observatory-idle-gap", "RetentionInDays": 7},
+        },
         "CollectorInvokePermission": {
             "Type": "AWS::Lambda::Permission",
             "Properties": {
@@ -97,25 +165,75 @@ def base_resources():
     }
 
 
+def prepare_packaging_dirs(combos):
+    """Write build inputs for layer/image variants into infra/.gen/ (gitignored).
+
+    layer: handler-only code dir + a layer dir holding requirements.txt
+    image: Dockerfile context with the handler and requirements
+    """
+    for workload in sorted({c[0] for c in combos if c[3] in ("layer", "image")}):
+        src = ROOT / "workloads" / workload
+        code = GEN / f"{workload}-code"
+        layer = GEN / f"{workload}-layer"
+        image = GEN / f"{workload}-image"
+        for d in (code, layer, image):
+            d.mkdir(parents=True, exist_ok=True)
+        shutil.copy(src / "app.py", code / "app.py")
+        shutil.copy(src / "requirements.txt", layer / "requirements.txt")
+        shutil.copy(src / "app.py", image / "app.py")
+        shutil.copy(src / "requirements.txt", image / "requirements.txt")
+        (image / "Dockerfile").write_text(
+            "FROM public.ecr.aws/lambda/python:3.12\n"
+            "COPY requirements.txt .\n"
+            "RUN pip install --no-cache-dir -r requirements.txt -t ${LAMBDA_TASK_ROOT}\n"
+            "COPY app.py ${LAMBDA_TASK_ROOT}\n"
+            'CMD ["app.handler"]\n'
+        )
+
+
+def layer_resources(combos):
+    """One layer per (workload, arch) used by a layer variant."""
+    out = {}
+    for workload, arch in sorted({(c[0], c[2]) for c in combos if c[3] == "layer"}):
+        out[logical(f"{workload}-{arch}-deps-layer")] = {
+            "Type": "AWS::Serverless::LayerVersion",
+            "Properties": {
+                "LayerName": f"observatory-{workload}-{arch}-deps",
+                "ContentUri": f".gen/{workload}-layer/",
+                "CompatibleRuntimes": ["python3.12"],
+                "CompatibleArchitectures": [ARCH[arch]],
+            },
+            "Metadata": {"BuildMethod": "python3.12", "BuildArchitecture": ARCH[arch]},
+        }
+    return out
+
+
 def test_function_resources(workload, memory, arch, packaging):
-    if packaging != "zip":
-        raise NotImplementedError("layer/image packaging comes in Stage 2")
     fid = function_id(workload, memory, arch, packaging)
     name = logical(fid)
+    props = {
+        "FunctionName": fid,
+        "Architectures": [ARCH[arch]],
+        "MemorySize": memory,
+        "Role": {"Fn::GetAtt": ["TestFunctionRole", "Arn"]},
+        "Environment": {"Variables": {"PYTHONPROFILEIMPORTTIME": "1", "BUST": "deploy"}},
+        "Tags": {"workload": workload, "arch": arch, "packaging": packaging},
+    }
+    function = {"Type": "AWS::Serverless::Function", "Properties": props}
+    if packaging == "zip":
+        props.update({"CodeUri": f"../workloads/{workload}/", "Handler": "app.handler", "Runtime": "python3.12"})
+    elif packaging == "layer":
+        props.update({
+            "CodeUri": f".gen/{workload}-code/",
+            "Handler": "app.handler",
+            "Runtime": "python3.12",
+            "Layers": [{"Ref": logical(f"{workload}-{arch}-deps-layer")}],
+        })
+    elif packaging == "image":
+        props["PackageType"] = "Image"
+        function["Metadata"] = {"Dockerfile": "Dockerfile", "DockerContext": f".gen/{workload}-image", "DockerTag": f"{arch}"}
     return {
-        f"{name}Function": {
-            "Type": "AWS::Serverless::Function",
-            "Properties": {
-                "FunctionName": fid,
-                "CodeUri": f"../workloads/{workload}/",
-                "Handler": "app.handler",
-                "Architectures": [ARCH[arch]],
-                "MemorySize": memory,
-                "Role": {"Fn::GetAtt": ["TestFunctionRole", "Arn"]},
-                "Environment": {"Variables": {"PYTHONPROFILEIMPORTTIME": "1", "BUST": "deploy"}},
-                "Tags": {"workload": workload, "arch": arch, "packaging": packaging},
-            },
-        },
+        f"{name}Function": function,
         f"{name}LogGroup": {
             "Type": "AWS::Logs::LogGroup",
             "Properties": {"LogGroupName": f"/aws/lambda/{fid}", "RetentionInDays": 7},
@@ -141,23 +259,27 @@ def main():
     for name in ("cost.py", "pricing.json"):
         shutil.copy(ROOT / "ml" / name, ROOT / "collector" / name)
 
+    combos = MATRICES[args.matrix]
+    prepare_packaging_dirs(combos)
     resources = base_resources()
-    for combo in MATRICES[args.matrix]:
+    resources.update(layer_resources(combos))
+    for combo in combos:
         resources.update(test_function_resources(*combo))
 
     template = {
         "AWSTemplateFormatVersion": "2010-09-09",
         "Transform": "AWS::Serverless-2016-10-31",
         "Description": f"Serverless Cold-Start Observatory ({args.matrix} matrix)",
-        "Globals": {"Function": {"Runtime": "python3.12", "Timeout": 30}},
+        "Globals": {"Function": {"Timeout": 30}},
         "Resources": resources,
         "Outputs": {
-            "FunctionIds": {"Value": ",".join(function_id(*c) for c in MATRICES[args.matrix])},
+            "FunctionIds": {"Value": ",".join(function_id(*c) for c in combos)},
+            "IdleGapFunctionArn": {"Value": {"Fn::GetAtt": ["IdleGapFunction", "Arn"]}},
         },
     }
     out = ROOT / "infra" / "template.yaml"
     out.write_text("# GENERATED by infra/generate_template.py - do not edit by hand\n" + yaml.safe_dump(template, sort_keys=False))
-    print(f"Wrote {out} with {len(MATRICES[args.matrix])} test functions ({len(resources)} resources)")
+    print(f"Wrote {out} with {len(combos)} test functions ({len(resources)} resources)")
 
 
 if __name__ == "__main__":
