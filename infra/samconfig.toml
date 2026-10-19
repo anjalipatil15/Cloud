@@ -1,0 +1,15 @@
+version = 0.1
+
+[default.global.parameters]
+stack_name = "observatory"
+
+[default.build.parameters]
+template_file = "template.yaml"
+use_container = true
+cached = true
+
+[default.deploy.parameters]
+capabilities = "CAPABILITY_IAM"
+resolve_s3 = true
+confirm_changeset = true
+# Region comes from your AWS profile (eu-north-1), not from this file.

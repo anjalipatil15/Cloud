@@ -1,0 +1,158 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: >
+  Stage 0 account setup for the Cold-Start Observatory: a least-privilege IAM
+  group and one IAM user per teammate. Deploy once, as an admin, with
+  `aws cloudformation deploy --capabilities CAPABILITY_NAMED_IAM`.
+  Users get console access only after an admin sets a password (no access keys
+  are created here; each person creates their own key after signing in).
+  The budget is created separately by scripts/create_budget.py, because
+  CloudFormation in eu-north-1 does not support AWS::Budgets::Budget.
+
+Parameters:
+  UserA:
+    Type: String
+    Default: obs-infra
+  UserB:
+    Type: String
+    Default: obs-pipeline
+  UserC:
+    Type: String
+    Default: obs-ml
+  StackPrefix:
+    Type: String
+    Default: observatory
+    Description: All SAM stacks and IAM roles for the project must start with this
+
+Resources:
+  DeveloperPolicy:
+    Type: AWS::IAM::ManagedPolicy
+    Properties:
+      ManagedPolicyName: !Sub "${StackPrefix}-developer"
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          # Lambda, DynamoDB, logs, EventBridge: limited to this account + region
+          - Sid: ProjectServicesInRegion
+            Effect: Allow
+            Action:
+              - lambda:*
+              - dynamodb:*
+              - logs:*
+              - events:*
+              - scheduler:*
+            Resource:
+              - !Sub "arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:*"
+              - !Sub "arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:*"
+              - !Sub "arn:aws:logs:${AWS::Region}:${AWS::AccountId}:*"
+              - !Sub "arn:aws:events:${AWS::Region}:${AWS::AccountId}:*"
+              - !Sub "arn:aws:scheduler:${AWS::Region}:${AWS::AccountId}:*"
+          - Sid: ListAndDescribe
+            Effect: Allow
+            Action:
+              - lambda:List*
+              - lambda:GetAccountSettings
+              - dynamodb:List*
+              - logs:Describe*
+              - cloudwatch:*
+              - cloudformation:List*
+              - cloudformation:Describe*
+              - cloudformation:ValidateTemplate
+              - cloudformation:GetTemplateSummary
+              - servicequotas:Get*
+              - servicequotas:List*
+              - ecr:GetAuthorizationToken
+              - pricing:*
+              - budgets:ViewBudget
+              - ce:Get*
+              - iam:ListRoles
+              - iam:GetRole
+              - xray:PutTraceSegments
+              - xray:PutTelemetryRecords
+            Resource: "*"
+          # SAM stacks: only ours, plus the SAM-managed bootstrap stack
+          - Sid: CloudFormationOurStacks
+            Effect: Allow
+            Action: cloudformation:*
+            Resource:
+              - !Sub "arn:aws:cloudformation:${AWS::Region}:${AWS::AccountId}:stack/${StackPrefix}*/*"
+              - !Sub "arn:aws:cloudformation:${AWS::Region}:${AWS::AccountId}:stack/aws-sam-cli-managed-default/*"
+              - !Sub "arn:aws:cloudformation:${AWS::Region}:aws:transform/Serverless-2016-10-31"
+              - !Sub "arn:aws:cloudformation:${AWS::Region}:${AWS::AccountId}:changeSet/*"
+          - Sid: SamArtifactBucket
+            Effect: Allow
+            Action: s3:*
+            Resource:
+              - "arn:aws:s3:::aws-sam-cli-managed-default-*"
+              - "arn:aws:s3:::aws-sam-cli-managed-default-*/*"
+          - Sid: EcrForImagePackaging
+            Effect: Allow
+            Action: ecr:*
+            Resource: !Sub "arn:aws:ecr:${AWS::Region}:${AWS::AccountId}:repository/*"
+          # Execution roles created by SAM: only names starting with the prefix
+          - Sid: ManageProjectRoles
+            Effect: Allow
+            Action:
+              - iam:CreateRole
+              - iam:DeleteRole
+              - iam:TagRole
+              - iam:UntagRole
+              - iam:UpdateAssumeRolePolicy
+              - iam:AttachRolePolicy
+              - iam:DetachRolePolicy
+              - iam:PutRolePolicy
+              - iam:DeleteRolePolicy
+              - iam:GetRolePolicy
+              - iam:ListRolePolicies
+              - iam:ListAttachedRolePolicies
+              - iam:PassRole
+            Resource: !Sub "arn:aws:iam::${AWS::AccountId}:role/${StackPrefix}*"
+          # Let each user manage their own password, MFA and access keys
+          - Sid: SelfService
+            Effect: Allow
+            Action:
+              - iam:ChangePassword
+              - iam:GetUser
+              - iam:CreateAccessKey
+              - iam:DeleteAccessKey
+              - iam:ListAccessKeys
+              - iam:UpdateAccessKey
+              - iam:CreateVirtualMFADevice
+              - iam:EnableMFADevice
+              - iam:ListMFADevices
+              - iam:ResyncMFADevice
+            Resource:
+              - "arn:aws:iam::*:user/${aws:username}"
+              - "arn:aws:iam::*:mfa/${aws:username}"
+          - Sid: GetPasswordPolicy
+            Effect: Allow
+            Action: iam:GetAccountPasswordPolicy
+            Resource: "*"
+
+  DevelopersGroup:
+    Type: AWS::IAM::Group
+    Properties:
+      GroupName: !Sub "${StackPrefix}-developers"
+      ManagedPolicyArns:
+        - !Ref DeveloperPolicy
+
+  UserInfra:
+    Type: AWS::IAM::User
+    Properties:
+      UserName: !Ref UserA
+      Groups: [!Ref DevelopersGroup]
+  UserPipeline:
+    Type: AWS::IAM::User
+    Properties:
+      UserName: !Ref UserB
+      Groups: [!Ref DevelopersGroup]
+  UserMl:
+    Type: AWS::IAM::User
+    Properties:
+      UserName: !Ref UserC
+      Groups: [!Ref DevelopersGroup]
+
+Outputs:
+  ConsoleSignInUrl:
+    Value: !Sub "https://${AWS::AccountId}.signin.aws.amazon.com/console"
+  DeveloperPolicyArn:
+    Value: !Ref DeveloperPolicy

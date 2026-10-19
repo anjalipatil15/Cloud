@@ -1,0 +1,34 @@
+# AWS credentials and local config - never commit
+.aws/
+*.pem
+credentials
+.env
+.env.*
+
+# SAM
+.aws-sam/
+samconfig.local.toml
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.ipynb_checkpoints/
+
+# Data exports (share via the team drive, not git)
+data/
+*.csv
+*.parquet
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
+# Copied from ml/ by infra/generate_template.py
+collector/cost.py
+collector/pricing.json
+# Generated
+infra/template.yaml

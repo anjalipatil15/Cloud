@@ -1,0 +1,28 @@
+{
+  "region": "eu-north-1",
+  "currency": "USD",
+  "as_of": "2026-10-19",
+  "source": "AWS Price List API (pricing:GetProducts, service AWSLambda, regionCode eu-north-1)",
+  "notes": "Duration prices are the first (lowest-usage) tier, which is the only tier this project reaches. Since Aug 2025 the INIT phase of ZIP functions on managed runtimes is billed at the normal duration price.",
+  "request_per_million": 0.20,
+  "duration_gb_s": {
+    "x86": 0.0000166667,
+    "arm64": 0.0000133334
+  },
+  "provisioned": {
+    "concurrency_gb_s": {
+      "x86": 0.0000044248,
+      "arm64": 0.0000035398
+    },
+    "duration_gb_s": {
+      "x86": 0.0000103245,
+      "arm64": 0.0000082596
+    }
+  },
+  "snapstart": {
+    "cache_gb_s": 0.0000015046,
+    "restore_gb": 0.0001397998,
+    "min_cache_seconds": 10800
+  },
+  "ephemeral_storage_gb_s": 0.0000000323
+}
