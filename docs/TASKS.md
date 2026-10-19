@@ -11,9 +11,13 @@ Rule: B and C never wait on A. C works on mock data until real data arrives.
 
 ## Stage 0: Setup (all, ~3 days)
 - [ ] One AWS account, budget alert ($5), IAM users per person (least privilege)
+  - Account + $5 budget done. Teammate IAM users: template ready (`infra/account-setup.yaml`), not deployed yet.
 - [ ] GitHub repo with the layout from CLAUDE.md, branch protection on main
+  - Local repo + layout done; GitHub repo not created yet.
 - [ ] Agree on `docs/data_contract.md` (table schemas from CLAUDE.md)
-- [ ] Check Lambda concurrency quota and SnapStart (Python) availability in our region
+  - Draft done (SK changed to `request_id`); waiting for team sign-off.
+- [x] Check Lambda concurrency quota and SnapStart (Python) availability in our region
+  - Quota is 10; increase to 1000 requested 2026-10-19 (pending). SnapStart for Python: available in eu-north-1.
 
 **Handover:** data contract signed off by all three.
 
@@ -21,19 +25,21 @@ Rule: B and C never wait on A. C works on mock data until real data arrives.
 
 ## Stage 1: Pilot end to end (week 1–2)
 **A**
-- [ ] Write `tiny`, `web`, `data` workloads (handler returns `{"ok": true}`)
-- [ ] `infra/generate_template.py` for a 3-function pilot, `sam deploy`
-- [ ] `runner/force_cold.py`: force cold start + invoke, log metadata to `invocations`
+- [x] Write `tiny`, `web`, `data` workloads (handler returns `{"ok": true}`)
+- [x] `infra/generate_template.py` for a 3-function pilot, `sam deploy`
+- [x] `runner/force_cold.py`: force cold start + invoke, log metadata to `invocations`
 
 **B**
-- [ ] DynamoDB tables in the SAM template
-- [ ] Collector Lambda: decode payload, parse REPORT + import-time lines, write rows
-- [ ] Subscription filter on pilot log groups
+- [x] DynamoDB tables in the SAM template
+- [x] Collector Lambda: decode payload, parse REPORT + import-time lines, write rows
+- [x] Subscription filter on pilot log groups
 
 **C**
-- [ ] `ml/pricing.json` for our region (x86, arm64, requests, PC, SnapStart)
-- [ ] `ml/cost.py`: init cost per invocation, monthly projection
+- [x] `ml/pricing.json` for our region (x86, arm64, requests, PC, SnapStart)
+- [x] `ml/cost.py`: init cost per invocation, monthly projection
 - [ ] Generate a mock dataset matching the contract; start EDA notebook
+
+Pilot verified 2026-10-19: 6 forced cold starts (tiny/web/data, 512 MB, x86) landed as merged rows with `init_ms` and import profiles.
 
 **Handovers:** A → B: pilot function names and log groups.
 B → C: first real CSV export from `invocations`. Pilot works when one forced cold
@@ -49,7 +55,8 @@ start shows up as a row with `init_ms` and an import profile.
 - [ ] `scripts/export_csv.py` run after every experiment
 
 **B**
-- [ ] EMF metrics from collector (InitDurationMs, ColdStart, ColdStartCostUSD)
+- [x] EMF metrics from collector (InitDurationMs, ColdStart, ColdStartCostUSD)
+  - Built into the collector in Stage 1; verified in CloudWatch for the pilot.
 - [ ] Grafana panels: cold-start rate, init vs memory by arch, init by packaging,
       cost per function, top slow imports
 

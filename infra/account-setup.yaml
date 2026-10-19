@@ -1,7 +1,8 @@
 AWSTemplateFormatVersion: "2010-09-09"
 Description: >
   Stage 0 account setup for the Cold-Start Observatory: a least-privilege IAM
-  group and one IAM user per teammate. Deploy once, as an admin, with
+  group, one IAM user per teammate, and a read-only user for Grafana.
+  Deploy once, as an admin, with
   `aws cloudformation deploy --capabilities CAPABILITY_NAMED_IAM`.
   Users get console access only after an admin sets a password (no access keys
   are created here; each person creates their own key after signing in).
@@ -150,6 +151,15 @@ Resources:
     Properties:
       UserName: !Ref UserC
       Groups: [!Ref DevelopersGroup]
+
+  # Machine user for Grafana's CloudWatch data source: read-only, no console.
+  # Create its access key in the IAM console and paste it into Grafana only.
+  GrafanaUser:
+    Type: AWS::IAM::User
+    Properties:
+      UserName: !Sub "${StackPrefix}-grafana"
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/CloudWatchReadOnlyAccess
 
 Outputs:
   ConsoleSignInUrl:
