@@ -24,10 +24,10 @@ def metric(metric_name, stat, dims, label):
     }
 
 
-def logs(query):
+def logs(query, groups=COLLECTOR_LOGS):
     return {
         "refId": "A", "datasource": DS, "queryMode": "Logs", "region": "default",
-        "logGroupNames": COLLECTOR_LOGS, "expression": query, "statsGroups": [],
+        "logGroupNames": groups, "expression": query, "statsGroups": [],
     }
 
 
@@ -88,10 +88,23 @@ panel("Slowest top-level imports", "table",
       12, 22, 12, 10, "Cumulative import time per top-level package (includes its submodules).",
       overrides=[{"matcher": {"id": "byName", "options": "avg_ms"}, "properties": [{"id": "unit", "value": "ms"}, {"id": "decimals", "value": 1}]}])
 
-# Row 5: filled in by the ML stage
-panel("Strategy recommendations", "text", {"refId": "A"}, 0, 32, 24, 4,
-      options={"mode": "markdown", "content": "Added in Stage 4: per-function strategy from `ml/recommender.py` "
-               "(cheapest of on-demand / SnapStart / provisioned concurrency meeting the latency target)."})
+# Row 5: strategy experiment + recommendations (filled by the ML stage)
+panel("SnapStart restore vs on-demand init", "table",
+      logs('filter @message like /^REPORT/ and @message like /(Init|Restore) Duration/'
+           ' | parse @message /(?<phase>Init|Restore) Duration: (?<ms>[\\d.]+) ms/'
+           " | stats avg(ms) as avg_ms, pct(ms, 90) as p90_ms, count() as n by @log, phase"
+           " | sort @log asc, phase asc",
+           ["/aws/lambda/web-512-x86-zip", "/aws/lambda/data-512-x86-zip"]),
+      0, 32, 12, 8, "Same functions: on-demand INIT vs SnapStart RESTORE, read from the functions' REPORT lines.", unit="ms",
+      overrides=[{"matcher": {"id": "byName", "options": "n"}, "properties": [{"id": "unit", "value": "none"}]}])
+panel("Strategy recommendations", "table",
+      logs('filter type = "recommendation"'
+           " | stats latest(strategy) as strategy, latest(monthly_cost_usd) as monthly_usd,"
+           " latest(p95_ms) as p95_ms, latest(latency_target_ms) as target_ms,"
+           " latest(pred_init_p50_ms) as init_p50_ms, latest(pred_init_p90_ms) as init_p90_ms"
+           " by function_id | sort function_id asc", ["/observatory/recommendations"]),
+      12, 32, 12, 8, "From ml/recommender.py via scripts/publish_recommendations.py: the cheapest strategy meeting the latency target.",
+      overrides=[{"matcher": {"id": "byName", "options": "monthly_usd"}, "properties": [{"id": "unit", "value": "currencyUSD"}, {"id": "decimals", "value": 4}]}])
 
 dashboard = {
     "uid": "cold-start-observatory",

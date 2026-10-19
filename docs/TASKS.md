@@ -49,9 +49,13 @@ start shows up as a row with `init_ms` and an import profile.
 
 ## Stage 2: Full experiments + first dashboard (weeks 3–4)
 **A**
-- [ ] Expand matrix (core sweep: workloads × memory × arch, ZIP)
-- [ ] Packaging experiment: `data` as ZIP vs layer vs container, both archs
-- [ ] Parallel runner (8 threads) + concurrent-burst trick; ~30 cold samples each
+- [x] Expand matrix (core sweep: workloads × memory × arch, ZIP)
+  - 36 functions (`--matrix core`; data/ml skip 128 MB, pandas needs ~130 MB). Run `core-sweep-20261019`: 30 cold starts each.
+- [x] Packaging experiment: `data` as ZIP vs layer vs container, both archs
+  - 8 variants (layer + image, 512/1024 MB, both archs), 30 cold starts each in `core-sweep-20261019`.
+    arm64 images first failed (built on an x86 base); fixed with arch-specific base tags and rerun.
+- [x] Parallel runner (8 threads) + concurrent-burst trick; ~30 cold samples each
+  - `force_cold.py --threads 6` (6 to stay under the 10-concurrency quota). Burst trick skipped until the quota rises.
 - [x] `scripts/export_csv.py` run after every experiment
 
 **B**
@@ -72,11 +76,15 @@ start shows up as a row with `init_ms` and an import profile.
 ## Stage 3: Idle-gap tests + models (weeks 5–6)
 **A**
 - [ ] Idle-gap scheduler Lambda on EventBridge (gaps 1, 5, 10, 20, 40 min), run 2–4 days
+  - `runner/idle_gap.py` deployed; chains started 2026-10-19 on tiny/web/data/ml-512-arm64-zip (run `idle-gap-20261019`).
+    Stop with `python runner/idle_gap.py stop`.
 - [ ] Strategy experiment: `web` and `data` under on-demand, SnapStart, PC (short runs)
+  - `runner/strategy.py`. SnapStart run started 2026-10-19 on web/data-512-x86-zip. PC blocked by the 10-concurrency quota.
 
 **B**
 - [ ] Model accuracy panel (predicted vs actual init time)
-- [ ] Panel for strategy results
+- [x] Panel for strategy results
+  - "SnapStart restore vs on-demand init" (Logs Insights on the functions' REPORT lines).
 
 **C**
 - [ ] Model A: XGBoost quantile regression for init time, GroupKFold, MAE/MAPE, coverage
@@ -93,11 +101,15 @@ start shows up as a row with `init_ms` and an import profile.
 - [ ] Write results to `recommendations`
 
 **B**
-- [ ] Recommendation panel; export dashboard JSON to `dashboards/`
-- [ ] (Optional) what-if panel
+- [x] Recommendation panel; export dashboard JSON to `dashboards/`
+  - Panel reads `/observatory/recommendations`, filled by `scripts/publish_recommendations.py` once C writes the table.
+    Also added a SnapStart-vs-init panel.
+- [ ] (Optional) what-if panel (skipped: no time)
 
 **A**
-- [ ] Final teardown of paid resources; README with deploy steps
+- [x] Final teardown of paid resources; README with deploy steps
+  - `scripts/check_running.py` lists what's billed; README "Teardown" has the steps. Run the actual
+    teardown after the idle-gap chains finish and C has exported the data.
 
 **All**
 - [ ] Report: problem, method, results, limitations

@@ -13,18 +13,14 @@ Full plan: `docs/TASKS.md`. Proposal: `docs/proposal.pdf`. Setup, team access an
 
 Keep the role split in docs and handovers.
 
-## Status (2026-10-19)
-- Scope for Anjali: everything up to the ML part (Stages 0-3 for A and B, plus handover data).
-  ML (models, SHAP, recommender) is done by a teammate (role C).
-- Stage 0: account, $5 budget, quota/SnapStart check, teammate IAM users (`observatory-account` stack),
-  GitHub repo (github.com/anjalipatil15/Cloud) done. Open: data contract sign-off,
-  Lambda concurrency 10 -> 1000 (support case 179237768000615, pending).
-- Stage 1: complete except C's mock dataset + EDA notebook. Run `pilot-1` verified end to end.
-- Stage 2/3 code written and built, NOT yet deployed (`--matrix full`: 36 core + 8 packaging functions,
-  idle-gap Lambda + schedule group): collector fixes (per-stream import counter, Grafana log fields),
-  `runner/idle_gap.py`, `runner/strategy.py`, `scripts/export_csv.py`, `scripts/demo_pipeline.py`,
-  Grafana in `dashboards/` (tested locally: datasource OK, metric panels return data).
-- Provisioned concurrency is impossible until the quota increase (Lambda keeps 10 unreserved).
+## Status (2026-10-19, end of day)
+- Roles A and B (Anjali) are complete. ML (role C, teammate) starts from `docs/HANDOVER_ML.md`.
+- Deployed: stack `observatory` with `--matrix full` (44 test functions + collector + idle-gap Lambda).
+- Data: `core-sweep-20261019` (44 functions x 30 cold starts), `snapstart-20261019` (web/data-512-x86-zip,
+  30 restores each), `idle-gap-20261019` (8 chains on tiny/web/data/ml-{512,1024}-arm64-zip, STILL RUNNING).
+- Still to do: stop idle-gap chains (`python runner/idle_gap.py stop`) and re-export CSVs; final teardown
+  (`sam delete`) only after C is done, since it deletes the tables.
+- Provisioned concurrency never measured (quota 10, case 179237768000615); modelled from pricing instead.
 - Keep `docs/TASKS.md` checkboxes and this section current when tasks finish.
 
 ## Team access

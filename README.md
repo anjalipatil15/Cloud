@@ -24,22 +24,35 @@ B and C never wait on A: C works on mock data until real data arrives.
 
 ## Progress (as of 2026-10-19)
 
-The pilot works end to end. Six forced cold starts across `tiny`, `web` and
-`data` (512 MB, x86, ZIP) arrived in DynamoDB as complete rows with init time,
-cost and import profile. First results: init takes about 70 ms for `tiny`,
-about 500 ms for `web`, and about 2,040 ms for `data`, where importing pandas
-alone takes 1.57 s.
+The infrastructure and data-pipeline side (roles A and B) is complete.
+The ML side (role C) starts from [docs/HANDOVER_ML.md](docs/HANDOVER_ML.md).
 
 | Stage | Done | Open |
 |---|---|---|
-| 0 Setup | AWS account (eu-north-1), $5 budget, quota and SnapStart check, repo layout, data contract draft | Teammate IAM users (template ready), GitHub repo, data contract sign-off, Lambda quota increase (requested, pending) |
-| 1 Pilot (A) | Workloads `tiny`/`web`/`data`/`ml`, template generator, pilot deployed, cold-start runner | — |
-| 1 Pilot (B) | DynamoDB tables, collector Lambda (with tests), subscription filters | — |
-| 1 Pilot (C) | `pricing.json` (from the AWS Price List API), `cost.py` | Mock dataset, EDA notebook |
-| 2 Experiments | EMF metrics from the collector | Core sweep, packaging experiment, CSV export, Grafana |
-| 3–4 | — | Idle-gap tests, models, recommender, report |
+| 0 Setup | AWS account (eu-north-1), $5 budget, teammate IAM users, GitHub repo, data contract | Lambda quota increase (pending with AWS) |
+| 1 Pilot | Workloads, template generator, collector, runner, pricing, cost model | C: mock dataset / EDA (superseded by real data) |
+| 2 Experiments | 44 functions deployed; 30 forced cold starts each; packaging experiment; CSV export; Grafana dashboard | C: feature table, comparison figures |
+| 3 Experiments | Idle-gap chains on 8 functions; SnapStart experiment on `web` and `data` | Provisioned concurrency (blocked by quota; modelled instead); C: models, SHAP |
+| 4 Finish | Recommendation panel wired up; cost check script; teardown steps | C: recommender; report; demo |
 
 Item-level status: [docs/TASKS.md](docs/TASKS.md).
+
+### Results so far
+
+Median cold-start (INIT) time from the core sweep:
+
+| Workload | x86 | arm64 |
+|---|---|---|
+| tiny (no imports) | ~78 ms | ~68 ms |
+| web (requests, jinja2, pydantic) | ~500 ms | ~445 ms |
+| data (pandas) | ~2,050 ms | ~1,785 ms |
+| ml (scikit-learn) | ~3,500–4,100 ms | ~3,450 ms |
+
+- **Memory size barely changes init time**, from 256 MB to 2 GB.
+- **arm64 starts 10–15% faster** and costs about 20% less per GB-second.
+- **Container images start about 3× faster than ZIP for `data` on x86** (~700 ms vs ~2,080 ms). Layers make no difference compared with ZIP.
+- **SnapStart cuts `data` from ~2,080 ms to ~560 ms**, but doesn't help `web`, which already starts in ~500 ms.
+- **Importing pandas takes 1.3–1.6 s**, most of `data`'s cold start.
 
 ## Team access
 
@@ -110,11 +123,11 @@ runner/force_cold.py ──update BUST env var──▶ test functions (tiny / w
 | `infra/generate_template.py` | Writes `infra/template.yaml` (SAM) for a function matrix |
 | `infra/account-setup.yaml` | IAM users for the team and Grafana (see Team access) |
 | `collector/` | Log-parser Lambda |
-| `runner/` | Cold-start forcer (idle-gap scheduler comes in Stage 3) |
+| `runner/` | Cold-start forcer, idle-gap scheduler Lambda, SnapStart / provisioned-concurrency experiment |
 | `ml/` | `pricing.json`, `cost.py`; models and recommender come later |
-| `scripts/` | Account check and budget setup |
+| `scripts/` | Account check, budget, CSV export, demo, publish recommendations, what's-still-billed check |
 | `tests/` | Unit tests (no AWS needed) |
-| `dashboards/` | Exported Grafana JSON |
+| `dashboards/` | Grafana: docker-compose, provisioning, dashboard JSON and its builder |
 
 Test functions are named `{workload}-{memory}-{arch}-{packaging}`, for example `data-512-arm64-zip`.
 
@@ -140,26 +153,44 @@ budget that emails you at 50% and 100% spend and at 100% forecast.
 ## Deploy
 
 ```cmd
-python infra\generate_template.py --matrix pilot
+python infra\generate_template.py --matrix full
 cd infra
 sam build
 sam deploy
 ```
 
-- `--matrix pilot` deploys 3 functions; `--matrix core` deploys the full 80-function sweep.
+- `--matrix full` = 36 core functions + 8 packaging variants (what is deployed now); `pilot` = 3 functions, `core` = 36.
+- One stack holds everything, so a deploy with a smaller matrix deletes the functions it leaves out.
 - `sam deploy` shows a change set and asks for confirmation.
 - Building arm64 functions on an x86 PC needs the arm64 build image, pulled once:
   `docker pull --platform linux/arm64 public.ecr.aws/sam/build-python3.12:latest-arm64`
 
 ## Run an experiment
 
+| Experiment | Command |
+|---|---|
+| Forced cold starts | `python runnerorce_cold.py --all --samples 30 --threads 6` |
+| Idle-gap chains (cold-start probability) | `python runner\idle_gap.py start --functions web-512-arm64-zip ...`, then `status` / `stop` |
+| SnapStart | `python runner\strategy.py snapstart --functions data-512-x86-zip --samples 30 --burst 1` |
+| Provisioned concurrency | `python runner\strategy.py provisioned --functions data-512-x86-zip` (needs quota > 10) |
+| End-to-end check / demo | `python scripts\demo_pipeline.py` |
+
+Results land in the DynamoDB `invocations` table within about a minute (log
+delivery delay). Then run `python scripts\export_csv.py` to write `data/*.csv`.
+
+Keep thread counts so that the total concurrent invocations stay under the
+account's concurrency limit (currently 10).
+
+## Dashboard
+
 ```cmd
-python runner\force_cold.py --functions tiny-512-x86-zip data-512-x86-zip --samples 3
-python runner\force_cold.py --all --samples 30 --threads 8
+docker compose -f dashboards/docker-compose.yml up -d
 ```
 
-Each sample forces one cold start. Results land in the DynamoDB `invocations`
-table within about a minute (log delivery delay).
+Open http://localhost:3000. Grafana reads CloudWatch with the read-only
+`observatory-grafana` AWS profile. Panels are defined in
+`dashboards/build_dashboard.py`; run it to regenerate `observatory.json`. ML
+recommendations appear after `python scripts\publish_recommendations.py`.
 
 ## Tests
 
@@ -169,8 +200,26 @@ python tests\test_collector.py
 
 ## Cost safety
 
-- Idle functions, tables and log groups cost almost nothing. A full core sweep
-  (80 functions × 30 cold starts) costs well under $1.
-- **Provisioned concurrency and SnapStart charge by the hour.** Enable them only
-  for a test run and remove them right after.
-- Tear everything down with `sam delete --stack-name observatory` (run from `infra/`).
+- `python scripts\check_running.py` lists everything still billed while idle:
+  provisioned concurrency, SnapStart, published versions, idle-gap schedules and ECR images.
+  Run it at the end of every session that ran an experiment.
+- Idle ZIP functions, tables and log groups cost almost nothing. The whole
+  measurement campaign cost well under $1.
+- **Provisioned concurrency and SnapStart charge by the hour.** `runner/strategy.py`
+  removes them when a run ends; `python runner\strategy.py cleanup --functions ...` removes leftovers.
+
+## Teardown
+
+When the project is finished (after the ML side has exported what it needs):
+
+```cmd
+python runner\idle_gap.py stop
+python runner\strategy.py cleanup --functions web-512-x86-zip data-512-x86-zip
+python scripts\export_csv.py
+cd infra
+sam delete --stack-name observatory
+```
+
+`sam delete` removes the functions, **the DynamoDB tables with all data**, the
+log groups and the ECR images, so export the CSVs first. The budget and the
+`observatory-account` stack (team IAM users) are separate; delete them in the console if needed.

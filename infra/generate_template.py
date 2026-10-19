@@ -169,26 +169,31 @@ def prepare_packaging_dirs(combos):
     """Write build inputs for layer/image variants into infra/.gen/ (gitignored).
 
     layer: handler-only code dir + a layer dir holding requirements.txt
-    image: Dockerfile context with the handler and requirements
+    image: one Dockerfile context per arch with the handler and requirements
     """
     for workload in sorted({c[0] for c in combos if c[3] in ("layer", "image")}):
         src = ROOT / "workloads" / workload
         code = GEN / f"{workload}-code"
         layer = GEN / f"{workload}-layer"
-        image = GEN / f"{workload}-image"
-        for d in (code, layer, image):
+        for d in (code, layer):
             d.mkdir(parents=True, exist_ok=True)
         shutil.copy(src / "app.py", code / "app.py")
         shutil.copy(src / "requirements.txt", layer / "requirements.txt")
-        shutil.copy(src / "app.py", image / "app.py")
-        shutil.copy(src / "requirements.txt", image / "requirements.txt")
-        (image / "Dockerfile").write_text(
-            "FROM public.ecr.aws/lambda/python:3.12\n"
-            "COPY requirements.txt .\n"
-            "RUN pip install --no-cache-dir -r requirements.txt -t ${LAMBDA_TASK_ROOT}\n"
-            "COPY app.py ${LAMBDA_TASK_ROOT}\n"
-            'CMD ["app.handler"]\n'
-        )
+        for arch in sorted({c[2] for c in combos if c[0] == workload and c[3] == "image"}):
+            image = GEN / f"{workload}-image-{arch}"
+            image.mkdir(parents=True, exist_ok=True)
+            shutil.copy(src / "app.py", image / "app.py")
+            shutil.copy(src / "requirements.txt", image / "requirements.txt")
+            # Arch-specific base tag: the plain `3.12` tag resolves to whatever
+            # platform Docker cached last, which once produced x86 "arm64" images.
+            (image / "Dockerfile").write_text(
+                f"FROM --platform=linux/{'arm64' if arch == 'arm64' else 'amd64'} "
+                f"public.ecr.aws/lambda/python:3.12-{ARCH[arch]}\n"
+                "COPY requirements.txt .\n"
+                "RUN pip install --no-cache-dir -r requirements.txt -t ${LAMBDA_TASK_ROOT}\n"
+                "COPY app.py ${LAMBDA_TASK_ROOT}\n"
+                'CMD ["app.handler"]\n'
+            )
 
 
 def layer_resources(combos):
@@ -231,7 +236,7 @@ def test_function_resources(workload, memory, arch, packaging):
         })
     elif packaging == "image":
         props["PackageType"] = "Image"
-        function["Metadata"] = {"Dockerfile": "Dockerfile", "DockerContext": f".gen/{workload}-image", "DockerTag": f"{arch}"}
+        function["Metadata"] = {"Dockerfile": "Dockerfile", "DockerContext": f".gen/{workload}-image-{arch}", "DockerTag": f"{arch}"}
     return {
         f"{name}Function": function,
         f"{name}LogGroup": {
