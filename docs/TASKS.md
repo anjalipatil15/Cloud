@@ -37,7 +37,8 @@ Rule: B and C never wait on A. C works on mock data until real data arrives.
 **C**
 - [x] `ml/pricing.json` for our region (x86, arm64, requests, PC, SnapStart)
 - [x] `ml/cost.py`: init cost per invocation, monthly projection
-- [ ] Generate a mock dataset matching the contract; start EDA notebook
+- [x] Generate a mock dataset matching the contract; start EDA notebook
+  - `ml/mock_data.py` (rows tagged `mock`); EDA figures in `ml/figures.py`.
 
 Pilot verified 2026-10-19: 6 forced cold starts (tiny/web/data, 512 MB, x86) landed as merged rows with `init_ms` and import profiles.
 
@@ -66,8 +67,9 @@ start shows up as a row with `init_ms` and an import profile.
   - Local Grafana via `dashboards/docker-compose.yml` (read-only `observatory-grafana` profile); dashboard JSON built by `dashboards/build_dashboard.py`.
 
 **C**
-- [ ] Feature table from real data; baseline model on core sweep
-- [ ] arm64 vs x86 and packaging comparison figures
+- [x] Feature table from real data; baseline model on core sweep
+  - `ml/features.py`; baseline = median INIT per (workload, arch), reported next to Model A.
+- [x] arm64 vs x86 and packaging comparison figures (`ml/figures.py` -> `ml/notebooks/fig_*.png`)
 
 **Handover:** A → C: full core-sweep CSV. B → all: dashboard link.
 
@@ -87,9 +89,10 @@ start shows up as a row with `init_ms` and an import profile.
   - "SnapStart restore vs on-demand init" (Logs Insights on the functions' REPORT lines).
 
 **C**
-- [ ] Model A: XGBoost quantile regression for init time, GroupKFold, MAE/MAPE, coverage
-- [ ] Model B: cold-start probability classifier, ROC-AUC, calibration plot
-- [ ] SHAP summary plot
+- [x] Model A: XGBoost quantile regression for init time, GroupKFold, MAE/MAPE, coverage (`ml/model_init.py`)
+- [x] Model B: cold-start probability classifier, ROC-AUC, calibration plot (`ml/model_cold.py`)
+- [x] SHAP summary plot (`fig_shap_summary.png`, `fig_shap_bar.png`)
+  - Rerun on the GitHub real-data exports 2026-10-20; outputs in `ml/notebooks/` are marked `mock: false`. Report numbers updated in `docs/REPORT.md`.
 
 **Handover:** A → C: idle-gap and strategy CSVs. A tears down PC/SnapStart.
 
@@ -97,8 +100,9 @@ start shows up as a row with `init_ms` and an import profile.
 
 ## Stage 4: Recommender + finish (weeks 7–8)
 **C**
-- [ ] `ml/recommender.py`: cheapest strategy meeting latency target per function
-- [ ] Write results to `recommendations`
+- [x] `ml/recommender.py`: cheapest strategy meeting latency target per function
+- [ ] Write results to `recommendations` (`python ml/recommender.py --write`; needs `obs-ml` credentials + real data)
+  - Real-data CSVs generated 2026-10-20. Not published: this environment has no `obs-ml` profile or default AWS credentials.
 
 **B**
 - [x] Recommendation panel; export dashboard JSON to `dashboards/`
@@ -113,4 +117,5 @@ start shows up as a row with `init_ms` and an import profile.
 
 **All**
 - [ ] Report: problem, method, results, limitations
+  - Role C updated the results with real-data model metrics and recommender counts on 2026-10-20; team review and finalization remain.
 - [ ] Demo recording
