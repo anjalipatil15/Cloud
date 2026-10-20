@@ -7,14 +7,15 @@ Column definitions: [data_contract.md](data_contract.md). Plan: [TASKS.md](TASKS
 
 ## Get the data
 
-Either use the CSVs Anjali shares, or export fresh ones with your `obs-ml` login
-(see [TEAM_ACCESS.md](TEAM_ACCESS.md)):
+The data is in the repo: **`data/invocations.csv`** and **`data/import_profiles.csv`**.
+Pull `main` to get the latest export; no AWS access needed.
+
+To export fresh copies from the live DynamoDB tables yourself, use your `obs-ml`
+login (see [TEAM_ACCESS.md](TEAM_ACCESS.md)):
 
 ```
-python scripts/export_csv.py        # writes data/invocations.csv and data/import_profiles.csv
+python scripts/export_csv.py        # overwrites data/invocations.csv and data/import_profiles.csv
 ```
-
-Re-export after the idle-gap run ends to get all of its rows.
 
 ## What's in `invocations.csv`
 

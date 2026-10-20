@@ -176,7 +176,8 @@ sam deploy
 | End-to-end check / demo | `python scripts\demo_pipeline.py` |
 
 Results land in the DynamoDB `invocations` table within about a minute (log
-delivery delay). Then run `python scripts\export_csv.py` to write `data/*.csv`.
+delivery delay). Then run `python scripts\export_csv.py` to write `data/*.csv`,
+and commit those files: `data/` is in git so the ML side can use it without AWS access.
 
 Keep thread counts so that the total concurrent invocations stay under the
 account's concurrency limit (currently 10).
@@ -205,6 +206,10 @@ python tests\test_collector.py
   Run it at the end of every session that ran an experiment.
 - Idle ZIP functions, tables and log groups cost almost nothing. The whole
   measurement campaign cost well under $1.
+- **The Grafana dashboard costs money per view.** Its Logs Insights panels are billed
+  per GB scanned (first 5 GB/month free, then about $0.005/GB). One load reads about 1 GB
+  of logs. Auto-refresh is off for this reason: don't turn it on, and close the
+  dashboard tab when you're done.
 - **Provisioned concurrency and SnapStart charge by the hour.** `runner/strategy.py`
   removes them when a run ends; `python runner\strategy.py cleanup --functions ...` removes leftovers.
 

@@ -8,10 +8,10 @@
   "timezone": "browser",
   "schemaVersion": 39,
   "time": {
-    "from": "now-7d",
+    "from": "now-2d",
     "to": "now"
   },
-  "refresh": "1m",
+  "refresh": "",
   "panels": [
     {
       "id": 1,

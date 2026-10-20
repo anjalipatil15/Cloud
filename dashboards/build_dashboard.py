@@ -112,8 +112,11 @@ dashboard = {
     "tags": ["lambda", "cold-start"],
     "timezone": "browser",
     "schemaVersion": 39,
-    "time": {"from": "now-7d", "to": "now"},
-    "refresh": "1m",
+    # Logs Insights bills per GB scanned over the whole time range, on every
+    # refresh (~1 GB per dashboard load at full data size). So: no auto-refresh,
+    # and a 2-day default window. Widen it by hand when needed.
+    "time": {"from": "now-2d", "to": "now"},
+    "refresh": "",
     "panels": _panels,
 }
 

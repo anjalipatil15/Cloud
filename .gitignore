@@ -16,9 +16,8 @@ __pycache__/
 venv/
 .ipynb_checkpoints/
 
-# Data exports (share via the team drive, not git)
-/data/
-*.csv
+# data/ is committed on purpose: the ML side needs the exported CSVs
+# (scripts/export_csv.py) without AWS access. Re-export and commit after experiments.
 *.parquet
 
 # OS / editor
