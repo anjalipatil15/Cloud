@@ -124,7 +124,7 @@ runner/force_cold.py ──update BUST env var──▶ test functions (tiny / w
 | `infra/account-setup.yaml` | IAM users for the team and Grafana (see Team access) |
 | `collector/` | Log-parser Lambda |
 | `runner/` | Cold-start forcer, idle-gap scheduler Lambda, SnapStart / provisioned-concurrency experiment |
-| `ml/` | `pricing.json`, `cost.py`; models and recommender come later |
+| `ml/` | `pricing.json`, `cost.py`, feature tables, figures, Model A (init time), Model B (cold-start probability), recommender, mock data; outputs in `ml/notebooks/` |
 | `scripts/` | Account check, budget, CSV export, demo, publish recommendations, what's-still-billed check |
 | `tests/` | Unit tests (no AWS needed) |
 | `dashboards/` | Grafana: docker-compose, provisioning, dashboard JSON and its builder |
@@ -193,10 +193,30 @@ Open http://localhost:3000. Grafana reads CloudWatch with the read-only
 `dashboards/build_dashboard.py`; run it to regenerate `observatory.json`. ML
 recommendations appear after `python scripts\publish_recommendations.py`.
 
+## ML analysis (role C)
+
+```cmd
+pip install -r ml/requirements.txt
+python scripts/export_csv.py          # real data -> data/*.csv  (or: python ml/mock_data.py)
+cd ml
+python figures.py                     # arch / memory / packaging / SnapStart / import figures
+python model_init.py                  # Model A: XGBoost quantile p50/p90, GroupKFold, SHAP
+python model_cold.py                  # Model B: P(cold | idle gap), ROC-AUC, calibration
+python recommender.py                 # per-function strategy, all scenarios -> ml/notebooks/*.csv
+python recommender.py --write         # + DynamoDB `recommendations` (target 1000 ms, 0.1 req/s by default)
+cd ..
+python scripts/publish_recommendations.py
+```
+
+All outputs (figures, metrics JSON, CSVs, trained models) go to `ml/notebooks/`.
+Figures made from `ml/mock_data.py` are titled `[MOCK DATA]`; the mock refuses to
+overwrite a real export. Method and results: [docs/REPORT.md](docs/REPORT.md).
+
 ## Tests
 
 ```cmd
 python tests\test_collector.py
+python -m pytest tests
 ```
 
 ## Cost safety
@@ -221,6 +241,7 @@ When the project is finished (after the ML side has exported what it needs):
 python runner\idle_gap.py stop
 python runner\strategy.py cleanup --functions web-512-x86-zip data-512-x86-zip
 python scripts\export_csv.py
+python ml\recommender.py --write && python scripts\publish_recommendations.py
 cd infra
 sam delete --stack-name observatory
 ```

@@ -1,0 +1,25 @@
+{
+  "n_rows": 450,
+  "n_functions": 8,
+  "cold_rate": 0.8422222222222222,
+  "cv": "GroupKFold(n_splits=4) by function_id",
+  "mock": false,
+  "logistic": {
+    "roc_auc": 0.8353524842989336,
+    "brier": 0.13054062704822497
+  },
+  "xgboost": {
+    "roc_auc": 0.8827158199858784,
+    "brier": 0.10106477354116322
+  },
+  "logistic_gap_only": {
+    "roc_auc": 0.8783306700360475,
+    "brier": 0.09530901700120013
+  },
+  "gap_min_at_p50": {
+    "data": 1.4390516422575395,
+    "ml": 1.5254188764422505,
+    "tiny": 2.737236766805692,
+    "web": 0.6550520224237573
+  }
+}
