@@ -1,20 +1,10 @@
 {
-  "intercept": -0.4940314116973119,
+  "intercept": -0.6939640975951807,
   "coef": {
-    "idle_gap_min": 0.3864451531995603,
-    "workload_data": -0.0620831206569817,
-    "workload_ml": -0.09545931970291473,
-    "workload_tiny": -0.5637604699943827,
-    "workload_web": 0.24088973253808124,
-    "log2_memory": -0.1812157603095828
+    "log_gap": 1.4634702558216581
   },
   "features": [
-    "idle_gap_min",
-    "workload_data",
-    "workload_ml",
-    "workload_tiny",
-    "workload_web",
-    "log2_memory"
+    "log_gap"
   ],
   "mock": false
 }

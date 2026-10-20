@@ -1,10 +1,10 @@
 # Serverless Cold-Start Observatory: report draft
 
-> **Status:** real-data analysis rerun on the GitHub `data/` exports (verified
-> byte-for-byte against the local CSVs on 2026-10-20). Model metrics and
-> recommendation counts below are from those exports, not the mock dataset.
-> Recommendations remain modelled estimates; see the Model B extrapolation
-> limitation in §4 before interpreting them operationally.
+> **Status (2026-10-20):** real-data analysis on the GitHub `data/` exports, not
+> the mock dataset. Model B was revised on 2026-10-20 to model the gap as
+> log(gap), so the predicted cold probability goes to 0 for very short gaps
+> (§2.4). Model B metrics and all recommendation counts below are from that
+> revised model. Recommendations are modelled estimates, not measured outcomes (§4).
 
 ## 1. Problem
 
@@ -56,9 +56,19 @@ strategy adds up requests, duration, INIT (on-demand), snapshot cache + restores
 
 ### 2.4 Model B: cold-start probability (`ml/model_cold.py`)
 - Rows from the idle-gap run that have a gap (the first invoke of each chain is dropped).
-- Logistic regression on idle_gap_min + workload + log2(memory), compared with a
-  gap-only logistic model and an XGBoost classifier. GroupKFold by function.
-  Metrics: ROC-AUC, Brier score, calibration curve.
+- **Model used by the recommender:** logistic regression on **log(gap)** only,
+  P(cold | g) = σ(a + b·log g). With b > 0 the curve rises monotonically and
+  P(cold) → 0 as g → 0, which matches a function that is called every few
+  seconds staying warm.
+- Why log(gap): the idle gaps were only ever 1, 5, 10, 20 or 40 minutes. A
+  logistic model that is linear in the gap extrapolates to a 26–44% cold
+  probability at a zero-minute gap. The recommender integrates over gaps of a few
+  seconds at 0.1 req/s, so that extrapolation drove most of its choices. Adding
+  both a linear and a log term was also tried; it fitted a U-shape (P(cold) → 1 at
+  0 min) and was rejected.
+- Compared with: a logistic model on gap + log(gap) + workload + log2(memory), and
+  an XGBoost classifier. GroupKFold by function. Metrics: ROC-AUC, Brier score,
+  calibration curve.
 - **From probability to rate:** with Poisson traffic at *r* req/s the gaps are
   exponential with mean 1/r, so cold rate = E[P(cold | G)].
 
@@ -114,43 +124,68 @@ matches §3.1: what is imported matters, and memory doesn't. `package_mb`,
 among them. Read them together as "how much code gets loaded".
 
 ### 3.3 Model B (real data)
-On 450 idle-gap invokes across 8 functions, GroupKFold ROC-AUC was 0.835 for
-logistic regression, 0.883 for XGBoost, and 0.878 for the gap-only logistic
-model. Their Brier scores were 0.131, 0.101 and 0.095, respectively
-(`fig_model_b_calibration.png`). The fitted full logistic model reaches P(cold) =
-0.5 at gaps of 0.66–2.74 minutes, depending on workload (`model_b_metrics.json`);
-the gap-only model performs comparably to the full logistic model.
+On 450 idle-gap invokes across 8 functions (overall cold rate 84%):
+
+| Model (GroupKFold by function) | ROC-AUC | Brier |
+|---|---|---|
+| **log(gap) logistic** (used by the recommender) | **0.882** | **0.101** |
+| XGBoost (gap, workload, memory) | 0.883 | 0.101 |
+| Full logistic (gap + log(gap) + workload + memory) | 0.851 | 0.128 |
+
+The log(gap) model matches XGBoost while having a single, well-behaved input.
+Workload and memory add noise with only 8 functions.
+
+| Idle gap | 0.1 min | 0.5 min | 1 min | 5 min | 10 min | 20 min | 40 min |
+|---|---|---|---|---|---|---|---|
+| Model P(cold) | 0.02 | 0.15 | 0.33 | 0.84 | 0.94 | 0.98 | 0.99 |
+| Measured | – | – | 0.52 (49/95) | 0.69 (55/80) | 1.00 | 1.00 | 1.00 |
+
+P(cold) = 0.5 at a gap of about **1.6 minutes** (`fig_model_b_curve.png`). The
+measured data shows Lambda recycling idle environments quickly: half of the
+invokes after a 1-minute gap were already cold, and every invoke after 10 minutes
+or more was cold.
 
 ### 3.4 Recommendations (real-data inputs)
 Number of the 44 functions assigned to each strategy by the model:
 
-| p95 target | req/s | on-demand | SnapStart | provisioned |
-|---|---|---|---|---|
-| 500 ms | 0.001 | 14 | 0 | 30 |
-| 500 ms | 0.01 | 14 | 0 | 30 |
-| 500 ms | 0.1 | 14 | 0 | 30 |
-| 500 ms | 1.0 | 14 | 0 | 30 |
-| 1000 ms | 0.001 | 23 | 12 | 9 |
-| 1000 ms | 0.01 | 23 | 13 | 8 |
-| 1000 ms | 0.1 | 23 | 0 | 21 |
-| 1000 ms | 1.0 | 22 | 0 | 22 |
+| p95 target | req/s | cold rate | on-demand | SnapStart | provisioned |
+|---|---|---|---|---|---|
+| 500 ms | 0.001 | 0.85 | 14 | 0 | 30 |
+| 500 ms | 0.01 | 0.40 | 14 | 0 | 30 |
+| 500 ms | 0.1 | 0.04 | 43 | 0 | 1 |
+| 500 ms | 1.0 | 0.002 | 43 | 0 | 1 |
+| 1000 ms | 0.001 | 0.85 | 23 | 12 | 9 |
+| 1000 ms | 0.01 | 0.40 | 23 | 13 | 8 |
+| 1000 ms | 0.1 | 0.04 | 43 | 0 | 1 |
+| 1000 ms | 1.0 | 0.002 | 43 | 0 | 1 |
 
-At the default 1000 ms, 0.1 req/s scenario, the model selects on-demand for 23
-functions and provisioned concurrency for 21; one function does not meet the
-target under any option. SnapStart is selected for 12–13 functions at the lower
-traffic scenarios, but none at 0.1 req/s or above. For the 500 ms target, the
-model selects provisioned concurrency for 30 functions at every tested traffic
-level. The full per-function results and option grid are in
-`ml/notebooks/recommendations.csv` and `ml/notebooks/recommendations_grid.csv`.
+**Traffic decides the strategy.**
+- **0.1 req/s or more:** a function is called every few seconds, so only about 4% of
+  calls start cold. That's below the 5% that a p95 can absorb, so on-demand meets
+  either target for 43 of 44 functions at no extra cost.
+- **Low traffic (one call every 100–1,000 s):** 40–85% of calls are cold, so heavy
+  functions need help.
+  - At a 1000 ms target, SnapStart is the cheapest fix for 12–13 functions: almost all
+    are the pandas `data` functions (ZIP and layer), whose ~0.56 s restore fits under
+    1 s, plus one scikit-learn function. For most `ml` functions the estimated restore
+    is above 1 s, so they need provisioned concurrency.
+  - At 500 ms, a SnapStart restore (~0.56 s) is already too slow, so 30 functions need
+    provisioned concurrency. These include the `web` x86 variants, whose ~500 ms INIT
+    sits right at the target.
+- **`tiny` stays on-demand in every scenario.** Its ~70 ms INIT never threatens either target.
 
-These are scenario outputs, not measured strategy outcomes. In particular,
-Model B was fit on idle gaps from about 1 to 40 minutes, but the recommender
-integrates its logistic curve over exponential gaps that can be shorter than
-the observed range. The fitted curve has a nonzero cold probability at zero
-gap, so this extrapolation can overstate cold-start rates at high traffic and
-affect which strategy is selected. Provisioned concurrency is also modelled,
-not measured. Validate the short-gap behaviour with additional measurements
-before using these strategy selections as operational advice.
+At the default scenario (1000 ms, 0.1 req/s) the picks total about **$23/month**
+for all 44 functions. Before the Model B revision they totalled $208/month, with
+provisioned concurrency for 21 functions.
+
+**The one provisioned pick at high traffic is a data artefact.** It is
+`data-1024-x86-image`. One of its forced cold starts ran INIT inside the invoke
+phase (no `Init Duration` field, 2.6 s duration), so it was recorded as warm and
+inflates that function's "warm" p95 (§4).
+
+Full per-function results and the option grid: `ml/notebooks/recommendations.csv`,
+`ml/notebooks/recommendations_grid.csv`, `ml/notebooks/recommendation_options.csv`.
+These are scenario outputs, not measured strategy outcomes.
 
 ## 4. Limitations
 - **Provisioned concurrency was not measured.** The account concurrency quota is 10
@@ -162,14 +197,20 @@ before using these strategy selections as operational advice.
   and only for arm64 at 512/1024 MB.
 - **Cold-rate model:** Poisson arrivals, one concurrent request at a time.
   Scale-out cold starts (bursts) and the periodic recycling of environments are
-  not modelled. Also, the fitted logistic model is extrapolated below the
-  measured idle-gap range (about 1–40 minutes); its nonzero zero-gap probability
-  may overestimate cold starts at high traffic. `recommender.py --cold-floor`
-  only adds a minimum and does not correct that extrapolation.
+  not modelled; `recommender.py --cold-floor` can add a minimum cold rate.
+- **Model B below 1 minute is an assumption.** No gap shorter than 1 minute was
+  measured. log(gap) assumes P(cold) falls smoothly to 0, which is plausible but
+  untested. The fitted curve is also a compromise between the measured points: it
+  underestimates the 1-minute cold rate (0.33 vs 0.52 measured) and overestimates
+  5 minutes (0.84 vs 0.69).
+- **One mislabelled cold start:** a forced cold start of `data-1024-x86-image`
+  ran INIT inside the invoke phase, so its REPORT line had no `Init Duration` and
+  the collector recorded it as warm. It doesn't affect Model A (cold rows only),
+  but it inflates that function's warm p95 in the recommender.
 - `data`/`ml` have no 128 MB variant, because pandas needs ~130 MB just to import.
 - One region (eu-north-1), one runtime (Python 3.12), synthetic handlers.
 - Model A is trained on 44 configurations, so it interpolates within this design
   and doesn't generalise to arbitrary code.
 
 ## 5. Reproduce
-See README → "ML analysis (role C)". Every figure referenced here is in `ml/notebooks/`.
+See README → "How to run it" → "Run the ML analysis". Every figure referenced here is in `ml/notebooks/`.

@@ -98,13 +98,24 @@ panel("SnapStart restore vs on-demand init", "table",
       0, 32, 12, 8, "Same functions: on-demand INIT vs SnapStart RESTORE, read from the functions' REPORT lines.", unit="ms",
       overrides=[{"matcher": {"id": "byName", "options": "n"}, "properties": [{"id": "unit", "value": "none"}]}])
 panel("Strategy recommendations", "table",
+      # Aliases must differ from the source field names, or Logs Insights reports a "cycle".
       logs('filter type = "recommendation"'
-           " | stats latest(strategy) as strategy, latest(monthly_cost_usd) as monthly_usd,"
-           " latest(p95_ms) as p95_ms, latest(latency_target_ms) as target_ms,"
+           " | stats latest(strategy) as recommended, latest(meets_target) as meets,"
+           " latest(p95_ms) as p95, latest(monthly_cost_usd) as monthly_usd,"
+           " latest(latency_target_ms) as target_ms, latest(traffic_rps) as rps,"
            " latest(pred_init_p50_ms) as init_p50_ms, latest(pred_init_p90_ms) as init_p90_ms"
            " by function_id | sort function_id asc", ["/observatory/recommendations"]),
       12, 32, 12, 8, "From ml/recommender.py via scripts/publish_recommendations.py: the cheapest strategy meeting the latency target.",
-      overrides=[{"matcher": {"id": "byName", "options": "monthly_usd"}, "properties": [{"id": "unit", "value": "currencyUSD"}, {"id": "decimals", "value": 4}]}])
+      overrides=[{"matcher": {"id": "byName", "options": "monthly_usd"}, "properties": [{"id": "unit", "value": "currencyUSD"}, {"id": "decimals", "value": 2}]},
+                 {"matcher": {"id": "byName", "options": "p95"}, "properties": [{"id": "unit", "value": "ms"}, {"id": "decimals", "value": 0}]},
+                 {"matcher": {"id": "byRegexp", "options": "init_p.*"}, "properties": [{"id": "unit", "value": "ms"}, {"id": "decimals", "value": 0}]},
+                 {"matcher": {"id": "byName", "options": "meets"}, "properties": [{"id": "mappings", "value": [
+                     {"type": "value", "options": {"1": {"text": "yes", "color": "green"}, "0": {"text": "no", "color": "red"}}}]},
+                     {"id": "custom.cellOptions", "value": {"type": "color-text"}}]}])
+# Recommendations are published once, not continuously: look back 30 days on this
+# panel so it doesn't go empty when the dashboard's 2-day window moves on. The log
+# group is tiny, so the longer window costs nothing.
+_panels[-1]["timeFrom"] = "30d"
 
 dashboard = {
     "uid": "cold-start-observatory",
