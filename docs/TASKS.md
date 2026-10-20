@@ -91,6 +91,8 @@ start shows up as a row with `init_ms` and an import profile.
 **C**
 - [x] Model A: XGBoost quantile regression for init time, GroupKFold, MAE/MAPE, coverage (`ml/model_init.py`)
 - [x] Model B: cold-start probability classifier, ROC-AUC, calibration plot (`ml/model_cold.py`)
+  - Revised 2026-10-20: gap modelled as log(gap) only, so P(cold) → 0 at short gaps (the linear
+    fit predicted 26–44% cold at 0 min). Recommender outputs regenerated; see REPORT §2.4, §3.3–3.4.
 - [x] SHAP summary plot (`fig_shap_summary.png`, `fig_shap_bar.png`)
   - Rerun on the GitHub real-data exports 2026-10-20; outputs in `ml/notebooks/` are marked `mock: false`. Report numbers updated in `docs/REPORT.md`.
 

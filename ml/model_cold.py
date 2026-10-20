@@ -27,8 +27,19 @@ import pandas as pd  # noqa: E402
 OUT = Path(__file__).resolve().parents[1] / "ml" / "notebooks"
 
 
+MIN_GAP_MIN = 1e-4  # keeps log(gap) finite at gap -> 0
+
+
+def _log_gap(gap_min):
+    return np.log(np.maximum(np.asarray(gap_min, dtype=float), MIN_GAP_MIN))
+
+
 def _design(d, columns=None):
-    X = pd.DataFrame({"idle_gap_min": d["idle_gap_min"].astype(float)})
+    # log_gap lets P(cold) fall to 0 as the gap shrinks to 0. With only the linear
+    # term, the fit (gaps of 1-40 min) extrapolated to a 26-44% cold rate at a 0-min
+    # gap, which the recommender then applied to traffic with ~10 s between requests.
+    X = pd.DataFrame({"idle_gap_min": d["idle_gap_min"].astype(float),
+                      "log_gap": _log_gap(d["idle_gap_min"])})
     X = X.join(pd.get_dummies(d["workload"], prefix="workload", dtype=float))
     X["log2_memory"] = np.log2(d["memory_mb"].astype(float) / 512)
     if columns is not None:
@@ -39,7 +50,8 @@ def _design(d, columns=None):
 def p_cold(gap_min, workload=None, memory_mb=512, coef_path=OUT / "model_b_logistic.json"):
     """P(cold | idle gap) from the exported logistic model. gap_min may be an array."""
     c = json.loads(Path(coef_path).read_text())
-    z = c["intercept"] + c["coef"]["idle_gap_min"] * np.asarray(gap_min, dtype=float)
+    z = c["intercept"] + c["coef"].get("idle_gap_min", 0.0) * np.asarray(gap_min, dtype=float)
+    z = z + c["coef"].get("log_gap", 0.0) * _log_gap(gap_min)
     z = z + c["coef"].get(f"workload_{workload}", 0.0) + c["coef"].get("log2_memory", 0.0) * np.log2(memory_mb / 512)
     return 1 / (1 + np.exp(-z))
 
@@ -85,10 +97,13 @@ def main():
         "xgboost": lambda: xgb.XGBClassifier(n_estimators=200, max_depth=2, learning_rate=0.05, tree_method="hist"),
         "logistic_gap_only": lambda: LogisticRegression(C=10.0, max_iter=2000),
     }
+    # Gap enters only as log(gap): one monotonic term, so P(cold) -> 0 as gap -> 0.
+    # (Linear + log together fit a U-shape on the 5 measured gaps: P(cold) -> 1 at 0 min.)
+    gap_cols = ["log_gap"]
     oof = {k: np.zeros(len(d)) for k in models}
     for train, test in GroupKFold(n_splits=n_splits).split(X, y, groups):
         for name, make in models.items():
-            cols = ["idle_gap_min"] if name == "logistic_gap_only" else X.columns
+            cols = gap_cols if name == "logistic_gap_only" else X.columns
             m = make().fit(X.iloc[train][cols], y[train])
             oof[name][test] = m.predict_proba(X.iloc[test][cols])[:, 1]
 
@@ -97,15 +112,18 @@ def main():
     for name, p in oof.items():
         metrics[name] = {"roc_auc": float(roc_auc_score(y, p)), "brier": float(brier_score_loss(y, p))}
 
-    # Final logistic on all data -> coefficients for the recommender.
-    final = LogisticRegression(C=10.0, max_iter=2000).fit(X, y)
-    coef = {"intercept": float(final.intercept_[0]), "coef": dict(zip(X.columns, map(float, final.coef_[0]))),
-            "features": list(X.columns), "mock": is_mock(inv)}
+    # Final model for the recommender: the gap-only logistic, which had the best
+    # out-of-fold Brier score (workload/memory added noise with 8 functions).
+    final = LogisticRegression(C=10.0, max_iter=2000).fit(X[gap_cols], y)
+    coef = {"intercept": float(final.intercept_[0]), "coef": dict(zip(gap_cols, map(float, final.coef_[0]))),
+            "features": gap_cols, "mock": is_mock(inv)}
     (out / "model_b_logistic.json").write_text(json.dumps(coef, indent=2))
-    # Gap at which P(cold) = 0.5, per workload at 512 MB.
-    metrics["gap_min_at_p50"] = {
-        w: float(-(coef["intercept"] + coef["coef"].get(f"workload_{w}", 0)) / coef["coef"]["idle_gap_min"])
-        for w in sorted(d["workload"].unique())
+    # Gap at which P(cold) = 0.5 (the curve is no longer linear in the gap: solve on a grid).
+    grid = np.linspace(0.01, float(d["idle_gap_min"].max()), 20000)
+    p = p_cold(grid, coef_path=out / "model_b_logistic.json")
+    metrics["gap_min_at_p50"] = float(grid[np.argmax(p >= 0.5)]) if (p >= 0.5).any() else None
+    metrics["p_cold_at_gap_min"] = {
+        str(g): round(float(p_cold(g, coef_path=out / "model_b_logistic.json")), 3) for g in (0.1, 0.5, 1, 5, 10, 20, 40)
     }
     (out / "model_b_metrics.json").write_text(json.dumps(metrics, indent=2))
 
@@ -125,13 +143,13 @@ def main():
 
     # P(cold) vs gap: binned observations + fitted curve per workload.
     fig, ax = plt.subplots(figsize=(7, 4))
-    grid = np.linspace(0, d["idle_gap_min"].max(), 200)
+    grid = np.linspace(0.05, d["idle_gap_min"].max(), 200)
     colors = {"tiny": "#4C72B0", "web": "#55A868", "data": "#C44E52", "ml": "#8172B2"}
     bins = np.arange(0, d["idle_gap_min"].max() + 5, 5)
     for w, g in d.groupby("workload"):
         b = g.groupby(pd.cut(g["idle_gap_min"], bins), observed=True)["is_cold"].mean()
-        ax.plot([iv.mid for iv in b.index], b.values, "o", color=colors.get(w), alpha=0.6)
-        ax.plot(grid, p_cold(grid, w, 512, out / "model_b_logistic.json"), "-", color=colors.get(w), label=w)
+        ax.plot([iv.mid for iv in b.index], b.values, "o", color=colors.get(w), alpha=0.6, label=f"{w} (measured)")
+    ax.plot(grid, p_cold(grid, coef_path=out / "model_b_logistic.json"), "k-", label="model (gap only)")
     ax.set_xlabel("idle gap before invoke (min)")
     ax.set_ylabel("P(cold)")
     ax.set_title(f"Cold-start probability vs idle gap (dots: 5-min bins){t}", fontsize=10)

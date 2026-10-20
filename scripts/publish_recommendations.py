@@ -45,7 +45,11 @@ def main():
     stream = f"publish-{time.strftime('%Y%m%d-%H%M%S')}"
     logs.create_log_stream(logGroupName=LOG_GROUP, logStreamName=stream)
 
-    now = int(time.time() * 1000)
+    # Logs Insights skips events stamped before the log group was created. A laptop
+    # clock slightly behind AWS's did exactly that on the first publish (events 0.6 s
+    # "older" than the group), so never stamp earlier than the group's creation time.
+    created = logs.describe_log_groups(logGroupNamePrefix=LOG_GROUP)["logGroups"][0]["creationTime"]
+    now = max(int(time.time() * 1000), created + 1000)
     events = [
         {"timestamp": now, "message": json.dumps({"type": "recommendation", **{k: _plain(v) for k, v in r.items()}})}
         for r in sorted(rows, key=lambda r: r["function_id"])

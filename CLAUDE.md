@@ -13,13 +13,16 @@ Full plan: `docs/TASKS.md`. Proposal: `docs/proposal.pdf`. Setup, team access an
 
 Keep the role split in docs and handovers.
 
-## Status (2026-10-19, end of day)
-- Roles A and B (Anjali) are complete. ML (role C, teammate) starts from `docs/HANDOVER_ML.md`.
+## Status (2026-10-20)
+- Roles A and B (Anjali): complete. Role C (teammate): ML done in `ml/` (merged PR #1); report draft in `docs/REPORT.md`.
 - Deployed: stack `observatory` with `--matrix full` (44 test functions + collector + idle-gap Lambda).
-- Data: `core-sweep-20261019` (44 functions x 30 cold starts), `snapstart-20261019` (web/data-512-x86-zip,
-  30 restores each), `idle-gap-20261019` (8 chains on tiny/web/data/ml-{512,1024}-arm64-zip, STILL RUNNING).
-- Still to do: stop idle-gap chains (`python runner/idle_gap.py stop`) and re-export CSVs; final teardown
-  (`sam delete`) only after C is done, since it deletes the tables.
+- Data (`data/*.csv`, committed): `core-sweep-20261019`, `idle-gap-20261019` (stopped), `snapstart-20261019`.
+- Model B revised (branch `fix/model-b-log-gap`): gap enters as log(gap) only, so P(cold) -> 0 at short gaps;
+  the old linear fit predicted 26-44% cold at 0 min and pushed the recommender to provisioned concurrency.
+- Known data issue: one `data-1024-x86-image` cold start has no `Init Duration` (INIT ran in the invoke
+  phase), so it is recorded as warm. Documented in REPORT §4; collector rule not yet changed.
+- Next: publish recommendations to Grafana (`ml/recommender.py --write`, then `scripts/publish_recommendations.py`).
+- Final teardown (`sam delete`) only after grading, since it deletes the tables.
 - Provisioned concurrency never measured (quota 10, case 179237768000615); modelled from pricing instead.
 - Keep `docs/TASKS.md` checkboxes and this section current when tasks finish.
 
@@ -41,11 +44,13 @@ infra/        generate_template.py -> template.yaml (generated, gitignored), sam
               account-setup.yaml (team IAM users + Grafana read-only user)
 collector/    log parser Lambda (app.py); cost.py + pricing.json are copied in from ml/ at generate time
 runner/       force_cold.py; idle-gap scheduler Lambda (Stage 3)
-ml/           pricing.json, cost.py, train.py, recommender.py, notebooks/
+ml/           pricing.json, cost.py, features.py, model_init.py (A), model_cold.py (B),
+              recommender.py, figures.py, mock_data.py; outputs in notebooks/
 scripts/      check_account.py (read-only), create_budget.py
 tests/        test_collector.py (plain asserts, no AWS)
 dashboards/   exported Grafana JSON
-docs/         TASKS.md, proposal.pdf, data_contract.md
+docs/         TASKS.md, REPORT.md, proposal.pdf, data_contract.md, TEAM_ACCESS.md, HANDOVER_ML.md,
+              architecture.svg/.png
 ```
 
 ## Environment

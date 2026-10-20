@@ -593,7 +593,7 @@
           "logGroupNames": [
             "/observatory/recommendations"
           ],
-          "expression": "filter type = \"recommendation\" | stats latest(strategy) as strategy, latest(monthly_cost_usd) as monthly_usd, latest(p95_ms) as p95_ms, latest(latency_target_ms) as target_ms, latest(pred_init_p50_ms) as init_p50_ms, latest(pred_init_p90_ms) as init_p90_ms by function_id | sort function_id asc",
+          "expression": "filter type = \"recommendation\" | stats latest(strategy) as recommended, latest(meets_target) as meets, latest(p95_ms) as p95, latest(monthly_cost_usd) as monthly_usd, latest(latency_target_ms) as target_ms, latest(traffic_rps) as rps, latest(pred_init_p50_ms) as init_p50_ms, latest(pred_init_p90_ms) as init_p90_ms by function_id | sort function_id asc",
           "statsGroups": []
         }
       ],
@@ -618,13 +618,78 @@
               },
               {
                 "id": "decimals",
-                "value": 4
+                "value": 2
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "p95"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "ms"
+              },
+              {
+                "id": "decimals",
+                "value": 0
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byRegexp",
+              "options": "init_p.*"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "ms"
+              },
+              {
+                "id": "decimals",
+                "value": 0
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "meets"
+            },
+            "properties": [
+              {
+                "id": "mappings",
+                "value": [
+                  {
+                    "type": "value",
+                    "options": {
+                      "1": {
+                        "text": "yes",
+                        "color": "green"
+                      },
+                      "0": {
+                        "text": "no",
+                        "color": "red"
+                      }
+                    }
+                  }
+                ]
+              },
+              {
+                "id": "custom.cellOptions",
+                "value": {
+                  "type": "color-text"
+                }
               }
             ]
           }
         ]
       },
-      "options": {}
+      "options": {},
+      "timeFrom": "30d"
     }
   ]
 }
